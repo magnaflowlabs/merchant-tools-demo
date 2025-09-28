@@ -5,7 +5,7 @@ A powerful blockchain merchant tool management platform designed specifically fo
 
 ### Requirements
 
-- Node.js 18+
+- Node.js 20+
 - npm or pnpm
 
 ### Install Dependencies
