@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { IconCheck, IconX, IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
+import { IconX } from '@tabler/icons-react';
 
 interface NotificationProps {
   id: string;
@@ -18,13 +18,6 @@ const notificationStyles = {
   info: 'bg-blue-50 border-blue-200 text-blue-800',
 };
 
-const notificationIcons = {
-  success: IconCheck,
-  error: IconX,
-  warning: IconAlertTriangle,
-  info: IconInfoCircle,
-};
-
 export function Notification({
   id,
   type,
@@ -33,8 +26,6 @@ export function Notification({
   onClose,
   duration = 12500,
 }: NotificationProps) {
-  // keep map for potential future use; not rendering Icon inline currently
-
   useEffect(() => {
     const timer = setTimeout(() => {
       onClose(id);

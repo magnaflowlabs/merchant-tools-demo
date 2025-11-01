@@ -1,13 +1,10 @@
-import React from 'react';
 import { Loader2 } from 'lucide-react';
 
 interface ConnectingOverlayProps {
   message?: string;
 }
 
-export const ConnectingOverlay: React.FC<ConnectingOverlayProps> = ({
-  message = 'Connecting...',
-}) => {
+export function ConnectingOverlay({ message = 'Connecting...' }: ConnectingOverlayProps) {
   return (
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center">
       <div className="flex flex-col items-center gap-6 p-12">
@@ -16,4 +13,4 @@ export const ConnectingOverlay: React.FC<ConnectingOverlayProps> = ({
       </div>
     </div>
   );
-};
+}

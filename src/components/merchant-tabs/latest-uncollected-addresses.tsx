@@ -5,7 +5,7 @@ export function LatestUncollectedAddresses({}) {
   return (
     <Card>
       <CardHeader className="flex items-center justify-between gap-3">
-        <CardTitle>Pending Collection Addresses</CardTitle>
+        <CardTitle>Pending collection addresses</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <CollectionDataTable />

@@ -1,36 +1,26 @@
-'use client';
-
 import { useEffect, useMemo, useRef, useState } from 'react';
-import BigNumber from 'bignumber.js';
 
 type Props = {
-  value: number | string | BigNumber;
-  duration?: number;
-  format?: (n: number) => string;
+  value: number;
+  duration?: number; // seconds
+  format?: (n: number) => string; // custom formatter
   className?: string;
 };
 
-export default function AnimatedNumber2({ value = 0, duration = 0.5, format, className }: Props) {
+export function AnimatedNumber({ value = 0, duration = 0.5, format, className }: Props) {
   const normalizeZero = (n: number) => (n === 0 ? 0 : n);
+  // Internal displayed value that animates towards target
+  const [displayValue, setDisplayValue] = useState<number>(() => normalizeZero(Math.round(value)));
 
-  const numericValue = useMemo(() => {
-    if (value instanceof BigNumber) {
-      return value.toNumber();
-    }
-    return typeof value === 'string' ? parseFloat(value) || 0 : value;
-  }, [value]);
-
-  const [displayValue, setDisplayValue] = useState<number>(() =>
-    normalizeZero(Math.round(numericValue))
-  );
-
-  const positionRef = useRef<number>(normalizeZero(Math.round(numericValue)));
+  // Physics-based spring integrator state
+  const positionRef = useRef<number>(normalizeZero(Math.round(value)));
   const velocityRef = useRef<number>(0);
-  const targetRef = useRef<number>(normalizeZero(Math.round(numericValue)));
+  const targetRef = useRef<number>(normalizeZero(Math.round(value)));
   const rafIdRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
-  const lastRenderedRoundedRef = useRef<number>(normalizeZero(Math.round(numericValue)));
+  const lastRenderedRoundedRef = useRef<number>(normalizeZero(Math.round(value)));
 
+  // Respect user reduced motion preference
   const prefersReducedMotion =
     typeof window !== 'undefined' &&
     typeof window.matchMedia === 'function' &&
@@ -42,8 +32,9 @@ export default function AnimatedNumber2({ value = 0, duration = 0.5, format, cla
     return format ? format(safe) : safe.toLocaleString();
   }, [displayValue, format]);
 
+  // Update target on prop change
   useEffect(() => {
-    const nextTarget = normalizeZero(Math.round(numericValue));
+    const nextTarget = normalizeZero(Math.round(value));
 
     if (prefersReducedMotion || duration <= 0) {
       targetRef.current = nextTarget;
@@ -51,6 +42,7 @@ export default function AnimatedNumber2({ value = 0, duration = 0.5, format, cla
       velocityRef.current = 0;
       lastRenderedRoundedRef.current = nextTarget;
       setDisplayValue(nextTarget);
+      // Stop any running loop
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
         rafIdRef.current = null;
@@ -60,22 +52,27 @@ export default function AnimatedNumber2({ value = 0, duration = 0.5, format, cla
 
     targetRef.current = nextTarget;
 
+    // Kick the loop if it isn't running
     if (rafIdRef.current === null) {
       lastTimeRef.current = typeof performance !== 'undefined' ? performance.now() : Date.now();
       rafIdRef.current = requestAnimationFrame(step);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [numericValue, duration, prefersReducedMotion]);
+  }, [value, duration, prefersReducedMotion]);
 
+  // rAF step function kept stable via ref binding
   const step = (now: number) => {
     const previousTime = lastTimeRef.current || now;
-    let dt = (now - previousTime) / 1000;
+    let dt = (now - previousTime) / 1000; // seconds
     lastTimeRef.current = now;
 
+    // Avoid large time steps (e.g., tab inactive)
     if (dt > 0.05) dt = 0.05;
 
+    // Map duration to spring constants. Shorter duration => snappier spring
+    // k roughly inverse to duration, damping set near critical
     const clampedDuration = Math.max(0.12, Math.min(2.5, duration));
-    const stiffness = 30 / clampedDuration;
+    const stiffness = 30 / clampedDuration; // arbitrary mapping tuned for UI
     const critical = 2 * Math.sqrt(stiffness);
     const damping = 0.9 * critical;
 
@@ -91,9 +88,11 @@ export default function AnimatedNumber2({ value = 0, duration = 0.5, format, cla
     positionRef.current = nextPosition;
     velocityRef.current = nextVelocity;
 
+    // Determine if we can stop: near target and almost no motion
     const rounded = normalizeZero(Math.round(nextPosition));
     const done = Math.abs(nextPosition - target) < 0.001 && Math.abs(nextVelocity) < 0.001;
 
+    // Only commit a state update if visible integer changed
     if (rounded !== lastRenderedRoundedRef.current) {
       lastRenderedRoundedRef.current = rounded;
       setDisplayValue(rounded);
@@ -102,6 +101,7 @@ export default function AnimatedNumber2({ value = 0, duration = 0.5, format, cla
     if (done) {
       positionRef.current = target;
       velocityRef.current = 0;
+      // Final commit if needed
       if (lastRenderedRoundedRef.current !== target) {
         lastRenderedRoundedRef.current = target;
         setDisplayValue(target);
@@ -113,6 +113,7 @@ export default function AnimatedNumber2({ value = 0, duration = 0.5, format, cla
     rafIdRef.current = requestAnimationFrame(step);
   };
 
+  // Start the loop on mount if needed; will be kicked by value effect
   useEffect(() => {
     return () => {
       if (rafIdRef.current !== null) {

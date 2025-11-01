@@ -7,14 +7,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { formatNumber } from '@/utils';
+import { DEFAULT_PAGE_SIZE_OPTIONS } from '@/config/constants';
 
 interface PaginationProps {
   currentPage: number;
   totalItems: number;
   pageSize: number;
-  selectedPageSize: string;
   onPageChange: (page: number) => void;
-  onPageSizeChange: (value: string) => void;
+  onPageSizeChange: (pageSize: number) => void;
   pageSizeOptions?: { value: string; label: string }[];
 }
 
@@ -22,14 +23,9 @@ export const Pagination = ({
   currentPage,
   totalItems,
   pageSize,
-  selectedPageSize,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [
-    { value: '10', label: '10 / page' },
-    { value: '20', label: '20 / page' },
-    { value: '50', label: '50 / page' },
-  ],
+  pageSizeOptions = DEFAULT_PAGE_SIZE_OPTIONS,
 }: PaginationProps) => {
   const totalPages = Math.ceil(totalItems / pageSize);
 
@@ -82,17 +78,20 @@ export const Pagination = ({
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-4">
         <div className="text-sm text-gray-600">
-          Total: <strong>{totalItems}</strong>
+          Total: <strong>{formatNumber(totalItems)}</strong>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={selectedPageSize} onValueChange={onPageSizeChange}>
+          <Select
+            value={pageSize.toString()}
+            onValueChange={(value) => onPageSizeChange(Number(value))}
+          >
             <SelectTrigger className="w-auto h-8">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {pageSizeOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
+              {pageSizeOptions.map(({ value, label }) => (
+                <SelectItem key={value} value={value}>
+                  {label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -123,7 +122,7 @@ export const Pagination = ({
             key={index}
             variant={page === currentPage ? 'default' : 'outline'}
             size="sm"
-            className="w-8 h-8"
+            className="min-w-8 h-8"
             onClick={() => typeof page === 'number' && goToPage(page)}
             disabled={page === '...'}
           >

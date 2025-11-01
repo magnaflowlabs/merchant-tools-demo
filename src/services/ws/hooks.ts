@@ -1,6 +1,15 @@
 import { useMutation } from '@tanstack/react-query';
-import { authBind, authLogin, wsService, passkeyVerifyStart, passkeyRegister } from './api';
-import type { AuthLoginArgs, AuthPasskeyRegisterArgs } from './type';
+import {
+  authBind,
+  authLogin,
+  wsService,
+  passkeyVerifyStart,
+  passkeyRegister,
+  passkeyVerifyFinish,
+  kitGetProfile,
+  kitUpdateProfile,
+} from './api';
+import type { AuthLoginArgs, AuthPasskeyRegisterArgs, AuthPasskeyVerifyFinishArgs } from './type';
 import { useAtom } from 'jotai';
 import { wsStoreAtom } from '@/stores/ws-store';
 import { useMemo } from 'react';
@@ -77,5 +86,23 @@ export const useAuthPasskeyVerifyStartMutation = () => {
 export const useAuthPasskeyRegisterMutation = () => {
   return useMutation({
     mutationFn: (arg: AuthPasskeyRegisterArgs) => passkeyRegister(arg),
+  });
+};
+
+export const useAuthPasskeyVerifyFinishMutation = () => {
+  return useMutation({
+    mutationFn: (arg: AuthPasskeyVerifyFinishArgs) => passkeyVerifyFinish(arg),
+  });
+};
+
+export const useAdminGetProfileMutation = () => {
+  return useMutation({
+    mutationFn: kitGetProfile,
+  });
+};
+
+export const useKitUpdateProfileMutation = () => {
+  return useMutation({
+    mutationFn: (args: { keystore_id: string }) => kitUpdateProfile(args),
   });
 };

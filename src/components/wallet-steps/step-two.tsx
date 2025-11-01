@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import * as bip39 from 'bip39';
 import { KeyService } from '@/services/KeyService';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { IconCopy, IconCheck, IconPlus } from '@tabler/icons-react';
+import { IconCopy, IconCheck, IconPlus, IconRotateClockwise } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { IconHelp } from '@tabler/icons-react';
@@ -37,9 +37,14 @@ export function StepTwo({ onNext, onBack }: StepTwoProps) {
       setCopied(true);
       toast.success('Mnemonic has been copied to the clipboard');
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       toast.error('Failed to copy, please manually copy');
     }
+  };
+
+  const handleReset = () => {
+    setMnemonicWords([]);
+    setErrorMessage('');
   };
 
   const handleCreateMnemonic = () => {
@@ -56,13 +61,62 @@ export function StepTwo({ onNext, onBack }: StepTwoProps) {
     if (errorMessage) setErrorMessage('');
   };
 
+  const handleKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const currentWord = mnemonicWords[index]?.trim() || '';
+
+      // Check if it's a single English word (only contains letters)
+      const isEnglishWord = /^[a-zA-Z]+$/.test(currentWord);
+
+      if (!currentWord) {
+        toast.error('Please enter a word first');
+        return;
+      }
+
+      if (!isEnglishWord) {
+        toast.error('Only English words are allowed, Chinese or other languages are not supported');
+        return;
+      }
+
+      // Check if it contains spaces (multiple words)
+      if (currentWord.includes(' ')) {
+        toast.error('Please enter a single word');
+        return;
+      }
+
+      // If current is the last input and word count is less than 24, add new input
+      if (index === mnemonicWords.length - 1 && mnemonicWords.length < 24) {
+        const newWords = [...mnemonicWords, ''];
+        setMnemonicWords(newWords);
+        // Delay to auto-focus on the new input after it's rendered
+        setTimeout(() => {
+          const nextInput = document.querySelector(
+            `input[placeholder="word ${index + 2}"]`
+          ) as HTMLInputElement;
+          if (nextInput) {
+            nextInput.focus();
+          }
+        }, 10);
+      } else if (index < mnemonicWords.length - 1) {
+        // If it's not the last input, focus on the next one
+        const nextInput = document.querySelector(
+          `input[placeholder="word ${index + 2}"]`
+        ) as HTMLInputElement;
+        if (nextInput) {
+          nextInput.focus();
+        }
+      }
+    }
+  };
+
   const handlePasteToFirst = async () => {
     try {
       const text = await navigator.clipboard.readText();
       const words = text.trim().split(/\s+/);
       setMnemonicWords(words);
       if (errorMessage) setErrorMessage('');
-    } catch (err) {
+    } catch {
       toast.error('Failed to read clipboard content');
     }
   };
@@ -75,11 +129,6 @@ export function StepTwo({ onNext, onBack }: StepTwoProps) {
       toast.error('Please enter mnemonic');
       return null;
     }
-    // Check Private Key Format
-    // if (isValidPrivateKey(mnemonicString)) {
-    //   setErrorMessage('');
-    //   return mnemonicString;
-    // }
 
     // Standardize mnemonic (multiple spaces become single space)
     const normalized = mnemonicString.split(/\s+/).join(' ').toLowerCase();
@@ -109,55 +158,62 @@ export function StepTwo({ onNext, onBack }: StepTwoProps) {
   };
 
   // Determine the number of rows to display based on the number of mnemonic words
-  const getWordCount = () => {
-    if (mnemonicWords.length === 0) return 12; // Default display 12 words
-    return mnemonicWords.length;
-  };
-
-  const wordCount = getWordCount();
-  const rows = Math.ceil(wordCount / 3); // 3 words per row
+  const getWordCount = useMemo(() => {
+    if (mnemonicWords?.length > 12) return mnemonicWords.length;
+    return 12;
+  }, [mnemonicWords]);
 
   return (
     <div className="flex flex-col gap-4 items-center">
       <Card className="w-full max-w-2xl">
         <CardHeader>
-          {/* Title and Action Buttons */}
           <div className="flex items-center justify-between">
             <div className="text-lg font-medium">
-              <CardTitle className="text-xl">Wallet Settings</CardTitle>
-              <CardDescription>Import Existing Mnemonic or Create New Wallet</CardDescription>
+              <CardTitle className="text-xl">Mnemonic Settings</CardTitle>
+              <CardDescription>Import Existing Mnemonic or Generate New Mnemonic</CardDescription>
             </div>
             <div className="flex items-center gap-2">
-              {mnemonicWords.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleCopy}
-                  className="flex items-center gap-2"
-                >
-                  {copied ? (
-                    <>
-                      <IconCheck className="h-4 w-4" />
-                      Copied
-                    </>
-                  ) : (
-                    <>
-                      <IconCopy className="h-4 w-4" />
-                      Copy
-                    </>
-                  )}
-                </Button>
+              {Boolean(mnemonicWords?.length) && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReset}
+                    className="flex items-center gap-2"
+                  >
+                    <IconRotateClockwise className="h-4 w-4" />
+                    Reset
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCopy}
+                    className="flex items-center gap-2"
+                  >
+                    {copied ? (
+                      <>
+                        <IconCheck className="h-4 w-4" />
+                        Copied
+                      </>
+                    ) : (
+                      <>
+                        <IconCopy className="h-4 w-4" />
+                        Copy
+                      </>
+                    )}
+                  </Button>
+                </>
               )}
               <Button variant="outline" size="sm" onClick={handleCreateMnemonic}>
                 <IconPlus className="h-4 w-4" />
-                Create New
+                New
               </Button>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <IconHelp className="h-5 w-5" />
                 </TooltipTrigger>
                 <TooltipContent>
-                  No mnemonic? Click to create a 12-word English mnemonic
+                  No Mnemonic? Click to New Button to generate a new Mnemonic
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -174,7 +230,7 @@ export function StepTwo({ onNext, onBack }: StepTwoProps) {
 
             {/* Mnemonic Input Grid */}
             <div className="grid grid-cols-3 gap-3">
-              {Array.from({ length: wordCount }, (_, index) => (
+              {Array.from({ length: getWordCount }, (_, index) => (
                 <div key={index} className="flex items-center gap-2">
                   <Badge variant="secondary" className="text-xs w-[20px] justify-center">
                     {index + 1}
@@ -182,6 +238,7 @@ export function StepTwo({ onNext, onBack }: StepTwoProps) {
                   <Input
                     value={mnemonicWords[index] || ''}
                     onChange={(e) => handleWordChange(index, e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(index, e)}
                     placeholder={`word ${index + 1}`}
                     className="text-sm"
                     onPaste={index === 0 ? handlePasteToFirst : undefined}

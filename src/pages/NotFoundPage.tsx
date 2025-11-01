@@ -3,8 +3,8 @@ import { useAuthStore } from '@/stores';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-export const NotFoundPage = () => {
-  const { isAuthenticated } = useAuthStore();
+export function NotFoundPage() {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
 
   return (
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10 bg-[#fafafa]">
@@ -18,18 +18,14 @@ export const NotFoundPage = () => {
             Sorry, the page you visited does not exist.
           </p>
           <div className="flex flex-col gap-2">
-            {isAuthenticated ? (
-              <Button asChild>
-                <Link to="dashboard">Back to dashboard</Link>
-              </Button>
-            ) : (
-              <Button asChild>
-                <Link to="login">Back to login</Link>
-              </Button>
-            )}
+            <Button asChild>
+              <Link to={isAuthenticated ? 'dashboard' : 'login'}>
+                {isAuthenticated ? 'Back to dashboard' : 'Back to login'}
+              </Link>
+            </Button>
           </div>
         </CardContent>
       </Card>
     </div>
   );
-};
+}

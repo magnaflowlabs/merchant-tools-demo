@@ -19,9 +19,9 @@ import {
 } from './hooks';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/stores/app-store';
-import { useWebSocketService, adminGetChainConfigs } from '@/services/ws';
-import { useChainConfigStore } from '@/stores/chain-config-store';
-import { useAuthStore } from '@/stores/auth-store';
+import { useWebSocketService } from '@/services/ws';
+import { useShallow } from '@/stores';
+import { useChainConfigLoader } from '@/hooks/use-chain-config-loader';
 
 import { useAtom } from 'jotai';
 import { wsStoreAtom } from '@/stores/ws-store';
@@ -39,8 +39,7 @@ export function PasskeyDialog() {
   const { registerPasskey } = usePasskeyRegister();
   const { addNotification } = useAppStore();
   const [wsConfig, setWsConfig] = useAtom(wsStoreAtom);
-  const { setChainConfigs, setError, setLoading } = useChainConfigStore();
-  const { setCurChain } = useAuthStore();
+  const { loadChainConfigs } = useChainConfigLoader();
 
   const merchantId = wsConfig.user?.merchant_id;
   useEffect(() => {
@@ -50,38 +49,12 @@ export function PasskeyDialog() {
   }, [merchantId, navigate]);
 
   const navigateToDashboard = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const result = await adminGetChainConfigs();
-      if (result.success && result.data) {
-        setChainConfigs(result.data.chain_configs);
-        if (result.data.chain_configs.length > 0) {
-          const firstChain = result.data.chain_configs[0];
-          setCurChain({
-            chain: firstChain.chain,
-            collection_address: firstChain.tokens[0]?.contract_addr || '',
-            payout_contract_address: firstChain.tokens[0]?.payout_contract_addr || '',
-            payout_contract_version: firstChain.tokens[0]?.payout_contract_version || '',
-          });
-        }
-      } else {
-        setError(result.error || 'Failed to load chain configurations');
-      }
-      setLoading(false);
+    await loadChainConfigs();
 
-      // Navigate to dashboard after chain configs fetch (success or failure)
-      navigate('/dashboard');
-      toast.success('Login Success', { duration: 1500 });
-    } catch (error) {
-      console.error('Failed to get chain configs:', error);
-      setError('Failed to load chain configurations');
-      setLoading(false);
-      // Still navigate to dashboard even if chain configs fail
-      navigate('/dashboard');
-      toast.success('Login Success', { duration: 1500 });
-    }
-  }, [navigate, setChainConfigs, setError, setLoading, setCurChain]);
+    // Navigate to dashboard after chain configs fetch (success or failure)
+    navigate('/dashboard');
+    toast.success('Login Success', { duration: 1500 });
+  }, [navigate, loadChainConfigs]);
 
   const onError = useCallback(
     (errorMessage: string) => {

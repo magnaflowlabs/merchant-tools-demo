@@ -13,8 +13,7 @@ import type {
 } from './type';
 import type {
   AddressInfo,
-  ServerResponse,
-  AddressUsageResponseNew,
+  AddressUsage,
   ChainConfig,
   MerchantLockPayoutOrderResponse,
 } from '@/types/merchant';
@@ -78,17 +77,66 @@ export const unsubscribePayinOrders = (args: { chain: string; events: string[] }
   wsService.sendRequest('kit_unsubscribe_payin_orders', args);
 
 export const queryAddressUsage = (args: { chain: string }) =>
-  wsService.sendRequest<AddressUsageResponseNew>('kit_query_address_usage', args);
+  wsService.sendRequest<AddressUsage>('kit_query_address_usage', args);
 
 // upload addresses
 export const uploadAddresses = (args: { chain: string; addresses: AddressInfo[] }) => {
-  return wsService.sendRequest<AddressUsageResponseNew>('kit_upload_address', args);
+  return wsService.sendRequest<AddressUsage>('kit_upload_address', args);
 };
 
+export const merchantIsLockedPayoutOrder = (prefixes: string[], chain: string) => {
+  return wsService.sendRequest<MerchantLockPayoutOrderResponse>(
+    MERCHANT_API_METHODS.IS_LOCKED_PREFIX,
+    {
+      type: LOCK_TYPES.PAYOUT_ORDER,
+      prefixies: prefixes,
+      chain: chain,
+    }
+  );
+};
 export const merchantLockPayoutOrder = (prefixes: string[], chain: string) => {
   return wsService.sendRequest<MerchantLockPayoutOrderResponse>(MERCHANT_API_METHODS.LOCK_PREFIX, {
     type: LOCK_TYPES.PAYOUT_ORDER,
     prefixies: prefixes,
     chain: chain,
   });
+};
+
+export const merchantUnlockPayoutOrder = (prefixes: string[], chain: string) => {
+  return wsService.sendRequest<MerchantLockPayoutOrderResponse>(
+    MERCHANT_API_METHODS.UNLOCK_PREFIX,
+    {
+      type: LOCK_TYPES.PAYOUT_ORDER,
+      prefixies: prefixes,
+      chain: chain,
+    }
+  );
+};
+export const merchantIsLockedRechargeOrder = (prefixes: string[], chain: string) => {
+  return wsService.sendRequest<MerchantLockPayoutOrderResponse>(
+    MERCHANT_API_METHODS.IS_LOCKED_PREFIX,
+    {
+      type: LOCK_TYPES.COLLECTION_GAS,
+      prefixies: prefixes,
+      chain: chain,
+    }
+  );
+};
+export const merchantLockRechargeOrder = (prefixes: string[], chain: string) => {
+  return wsService.sendRequest<MerchantLockPayoutOrderResponse>(MERCHANT_API_METHODS.LOCK_PREFIX, {
+    type: LOCK_TYPES.COLLECTION_GAS,
+    prefixies: prefixes,
+    chain: chain,
+  });
+};
+
+export const merchantUnlockRechargeOrder = (prefixes: string[], chain: string) => {
+  return wsService.sendRequest<MerchantLockPayoutOrderResponse>(
+    MERCHANT_API_METHODS.UNLOCK_PREFIX,
+    {
+      type: LOCK_TYPES.COLLECTION_GAS,
+      prefixies: prefixes,
+      chain: chain,
+    }
+  );
 };

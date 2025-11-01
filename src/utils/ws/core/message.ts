@@ -32,7 +32,17 @@ export class MessageManager extends EventEmitter {
 
   receiveMessage(rawData: any): void {
     try {
+      // Security: Validate message structure
+      if (!rawData || (typeof rawData !== 'object' && typeof rawData !== 'string')) {
+        throw new Error('Invalid message: expected object or string');
+      }
+
       const data = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+
+      // Security: Ensure parsed data is an object
+      if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+        throw new Error('Invalid message format: expected object');
+      }
 
       // Check if this is a push message (new format: has type: "push" and method field)
       if (data.type === 'push' && data.method && data.nonce) {

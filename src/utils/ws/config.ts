@@ -55,6 +55,10 @@ export const MESSAGE_CONFIG = {
   // Message timeout (30 seconds)
   DEFAULT_TIMEOUT: 30000,
 
+  // Message size limits (security)
+  MAX_MESSAGE_SIZE: 1024 * 1024, // 1MB - prevents memory exhaustion attacks
+  MAX_STRING_LENGTH: 10 * 1024 * 1024, // 10MB - maximum string length
+
   // Message ID prefix
   ID_PREFIX: {
     MESSAGE: 'msg',
@@ -66,7 +70,8 @@ export const MESSAGE_CONFIG = {
 export const TASK_CONFIG = {
   // Base check interval (200ms)
   BASE_INTERVAL: 200,
-  HEARTBEAT_INTERVAL: 5_000, // 5 seconds
+  HEARTBEAT_INTERVAL: 1000, // 2.5 seconds
+  HEARTBEAT_SEND_TIMEOUT: 5000, // 5 seconds
   HEARTBEAT_TIMEOUT_FACTOR: 3, // 3 times of heartbeat interval
   QUEUE_CHECK_INTERVAL: 3_000,
   STATUS_CHECK_INTERVAL: 3_000,

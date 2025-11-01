@@ -2,11 +2,11 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { useMerchantStore } from './merchant-store';
 import { useWalletStore } from './wallet-store';
-import { Wallet } from 'ethers';
-
-import { useAuthStore } from './auth-store';
+import BigNumber from 'bignumber.js';
+import { toast } from 'sonner';
 import { generateMultipleTronAddresses } from '@/utils/bip32-utils';
 import { uploadAddresses } from '@/services/ws/api';
+import { useChainConfigStore } from './chain-config-store';
 const SYNC_CHECK_INTERVAL = 3000;
 const MAX_ADDRESS_BATCH_SIZE = 400;
 
@@ -16,9 +16,21 @@ interface SyncConfigState {
   isSyncingAddress: boolean;
   isExecutingSync: boolean;
 
+  // Progress tracking
+  syncProgress: {
+    current: number;
+    total: number;
+    stage: 'generating' | 'uploading' | 'idle';
+  };
+
   setMinSubAccountThreshold: (value: string) => void;
   setAutoGenerateAddressCount: (value: string) => void;
   setIsSyncingAddress: (value: boolean) => void;
+  setSyncProgress: (progress: {
+    current: number;
+    total: number;
+    stage: 'generating' | 'uploading' | 'idle';
+  }) => void;
 
   resetToDefaults: () => void;
 
@@ -35,10 +47,17 @@ export const useSyncConfigStore = create<SyncConfigState>()(
   persist(
     (set, get) => ({
       // state data - initial value will be loaded from cache in persist middleware
-      minSubAccountThreshold: '200',
-      autoGenerateAddressCount: '500',
+      minSubAccountThreshold: '5000',
+      autoGenerateAddressCount: '5000',
       isSyncingAddress: false,
       isExecutingSync: false,
+
+      // Initialize progress tracking
+      syncProgress: {
+        current: 0,
+        total: 0,
+        stage: 'idle' as const,
+      },
 
       // set minimum sub account threshold
       setMinSubAccountThreshold: (value: string) => {
@@ -58,7 +77,14 @@ export const useSyncConfigStore = create<SyncConfigState>()(
           get().startSyncTimer();
         } else {
           get().stopSyncTimer();
+          // Reset progress when stopping sync
+          set({ syncProgress: { current: 0, total: 0, stage: 'idle' } });
         }
+      },
+
+      // set sync progress
+      setSyncProgress: (progress) => {
+        set({ syncProgress: progress });
       },
 
       // reset to default value
@@ -66,6 +92,7 @@ export const useSyncConfigStore = create<SyncConfigState>()(
         set({
           isSyncingAddress: false,
           isExecutingSync: false,
+          syncProgress: { current: 0, total: 0, stage: 'idle' },
         });
         // stop timer when reset
         get().stopSyncTimer();
@@ -96,7 +123,6 @@ export const useSyncConfigStore = create<SyncConfigState>()(
             await state.executeSyncOperation();
           } catch (error) {
             console.error('Sync operation failed in timer:', error);
-            // Don't stop the timer on error, let it continue trying
           }
         }, SYNC_CHECK_INTERVAL);
       },
@@ -109,62 +135,97 @@ export const useSyncConfigStore = create<SyncConfigState>()(
         }
       },
 
-      // batch generate and upload addresses
+      // batch generate and upload addresses with progress tracking
       generateAndUploadAddressesInBatches: async (totalNeeded: number, startIndex: number) => {
         let currentIndex = startIndex;
         let remainingCount = totalNeeded;
-        const { cur_chain } = useAuthStore.getState();
+        let totalProcessed = 0;
+        const curChainConfig = useChainConfigStore.getState().curChainConfig;
+
+        // Initialize progress tracking
+        get().setSyncProgress({ current: 0, total: totalNeeded, stage: 'generating' });
+
         while (remainingCount > 0) {
-          // cancellation check: stop immediately if syncing has been turned off
           const state = get();
           if (!state.isSyncingAddress) {
             break;
           }
-          // calculate current batch size
+
           const batchSize = Math.min(remainingCount, MAX_ADDRESS_BATCH_SIZE);
 
           try {
-            const newAddresses = await generateMultipleTronAddresses(currentIndex, batchSize);
-            // prepare upload data
-            const createAddress = newAddresses.map((key) => ({
+            // Update progress for generation stage
+            get().setSyncProgress({
+              current: totalProcessed,
+              total: totalNeeded,
+              stage: 'generating',
+            });
+
+            // Generate addresses with progress callback
+            const newAddresses = await generateMultipleTronAddresses(
+              currentIndex,
+              batchSize,
+              (current) => {
+                // Update fine-grained progress during generation
+                const globalProgress = totalProcessed + current;
+                get().setSyncProgress({
+                  current: globalProgress,
+                  total: totalNeeded,
+                  stage: 'generating',
+                });
+              }
+            );
+
+            const createAddress = (
+              newAddresses as Array<{ address: string; privateKey: string; path: string }>
+            ).map((key) => ({
               path: key.path || '',
               address: key.address || '',
             }));
 
+            // Update progress for upload stage
+            totalProcessed += batchSize;
+            get().setSyncProgress({
+              current: totalProcessed,
+              total: totalNeeded,
+              stage: 'uploading',
+            });
+
             const uploadResult = await uploadAddresses({
-              chain: cur_chain.chain,
+              chain: curChainConfig.chain,
               addresses: createAddress,
             });
 
-            // update merchant store with latest address usage data (but not too frequently)
-            if (uploadResult?.data) {
+            if (uploadResult?.data && uploadResult?.success) {
               const merchantStore = useMerchantStore.getState();
+
               merchantStore.updateAddressUsage(uploadResult.data);
+            } else {
+              get().setIsSyncingAddress(false);
+              toast.error('Upload addresses failed, please try again later');
+              return;
             }
 
             // update index and remaining count
             currentIndex += batchSize;
             remainingCount -= batchSize;
 
-            // // if there is remaining, add small delay to prevent UI blocking
-            // if (remainingCount > 0) {
-            //   // cancellation check before proceeding to next batch
-            //   if (!get().isSyncingAddress) {
-            //
-            //     );
-            //     break;
-            //   }
-            //
-            //   // Add small delay to prevent UI blocking, but keep it minimal
-            //   await new Promise((resolve) => setTimeout(resolve, 50));
-            // }
+            // Update progress after successful upload
+            get().setSyncProgress({
+              current: totalProcessed,
+              total: totalNeeded,
+              stage: 'generating',
+            });
           } catch (error) {
             console.error(error);
+            get().setIsSyncingAddress(false);
+            toast.error('Address generation failed, please try again later');
             throw error;
           }
         }
 
-        // Upload task completed successfully
+        // Reset progress when completed
+        get().setSyncProgress({ current: 0, total: 0, stage: 'idle' });
       },
 
       // execute sync operation function - pure logic, not including timer
@@ -191,32 +252,18 @@ export const useSyncConfigStore = create<SyncConfigState>()(
           const minSubAccountThreshold = parseInt(state.minSubAccountThreshold) || 0;
 
           // check if current unused address count is less than minimum sub account threshold
-          if (Number(available) < Number(minSubAccountThreshold)) {
-            // get latest address usage to determine start index
-            // await merchantStore.queryAddressUsage();
-            // calculate needed address count
+          // BigNumber(available).lt(minSubAccountThreshold)
+          if (BigNumber(available).lt(minSubAccountThreshold)) {
             const neededAddressCount = Number(autoGenerateAddressCount);
-
             // get wallet information
             const walletStore = useWalletStore.getState();
-            const keystoreData = walletStore.keystoreData || '';
-            const password = walletStore.walletPassword || '';
 
-            if (!keystoreData || !password || !walletStore.keystore_id) {
+            // Check if wallet mnemonic is available for address generation
+            if (!walletStore.hasWalletMnemonic()) {
               console.error('Wallet information is incomplete, cannot generate addresses');
               return;
             }
 
-            // decrypt wallet to get mnemonic
-            const wallet = await Wallet.fromEncryptedJson(keystoreData, password);
-            // let mnemonic = '';
-
-            if (wallet && 'mnemonic' in wallet && wallet.mnemonic) {
-              // mnemonic = wallet.mnemonic.phrase || '';
-            } else {
-              console.error('Wallet does not have mnemonic information');
-              return;
-            }
             const { last_path } = merchantStore.addressUsage || {};
             let Newlast_path = last_path;
             if (!Newlast_path) {
@@ -224,7 +271,7 @@ export const useSyncConfigStore = create<SyncConfigState>()(
             }
 
             const pathIndex = Newlast_path?.match(/(\d+)'?$/);
-            let currentStartIndex = parseInt(pathIndex?.[1] || '0') + 1;
+            const currentStartIndex = parseInt(pathIndex?.[1] || '0') + 1;
             // batch generate and upload addresses
             await get().generateAndUploadAddressesInBatches(neededAddressCount, currentStartIndex);
           }

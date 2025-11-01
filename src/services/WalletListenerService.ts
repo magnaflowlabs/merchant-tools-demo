@@ -1,5 +1,6 @@
 import { getTronWebInstance } from '../utils/tronweb-manager';
 import { logger } from '../utils/logger';
+import { useChainConfigStore } from '@/stores/chain-config-store';
 export interface WalletStateChangeEvent {
   type: 'connect' | 'disconnect' | 'accountsChanged';
   address?: string;
@@ -82,7 +83,10 @@ export class WalletListenerService {
 
     let tronWeb: any = null;
     try {
-      tronWeb = getTronWebInstance('nile');
+      const curChainConfig = useChainConfigStore.getState().curChainConfig;
+      tronWeb = curChainConfig?.chain
+        ? getTronWebInstance(curChainConfig)
+        : getTronWebInstance('nile');
     } catch (error) {
       tronWeb = (window as any).tronWeb;
     }
@@ -207,7 +211,10 @@ export class WalletListenerService {
 
     let tronWeb: any = null;
     try {
-      tronWeb = getTronWebInstance('nile');
+      const curChainConfig = useChainConfigStore.getState().curChainConfig;
+      tronWeb = curChainConfig?.chain
+        ? getTronWebInstance(curChainConfig)
+        : getTronWebInstance('nile');
     } catch (error) {
       tronWeb = (window as any).tronWeb;
     }

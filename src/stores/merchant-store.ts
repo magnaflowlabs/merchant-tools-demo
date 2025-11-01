@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { queryCollectionHistory, queryAddressUsage } from '@/services/ws/api';
 import { useWebSocketService } from '@/services/ws';
-import { useAuthStore } from './auth-store';
+import { useChainConfigStore } from '@/stores/chain-config-store';
 import type { CollectionHistoryParams, CollectionHistoryResponse } from '@/services/ws/type';
 interface MerchantState {
   addressUsage: {
@@ -61,9 +61,9 @@ export const useMerchantStore = create<MerchantState>()(
 
       queryAddressUsage: async () => {
         set({ error: null });
-        const { cur_chain } = useAuthStore.getState();
+        const curChainConfig = useChainConfigStore.getState().curChainConfig;
         try {
-          const response = await queryAddressUsage({ chain: cur_chain.chain });
+          const response = await queryAddressUsage({ chain: curChainConfig.chain });
           if (response?.data) {
             const { last_path } = response?.data;
             set({ lastPath: last_path });
@@ -88,6 +88,7 @@ export const useMerchantStore = create<MerchantState>()(
 
         try {
           const response = await queryCollectionHistory(args);
+
           set({
             collectionHistory: response.data,
           });
@@ -116,6 +117,8 @@ export const useMerchantStore = create<MerchantState>()(
       startCollecting: async () => {
         set({ isCollecting: true, error: null });
         try {
+          // update order store subscription status
+          // Note: subscription status management removed from order store
         } catch (error) {
           set({
             isCollecting: false,
@@ -157,7 +160,7 @@ export const useMerchantStore = create<MerchantState>()(
       name: 'merchant-store',
       partialize: (state) => ({
         isPaying: state.isPaying,
-        isCollecting: state.isCollecting,
+        // isCollecting: state.isCollecting,
         minBalance: state.minBalance,
       }),
     }

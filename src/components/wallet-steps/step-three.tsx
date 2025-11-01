@@ -3,9 +3,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { KeystoreService } from '@/services/KeystoreService';
+import { ToggleVisibilityButton } from '@/components/customerUI';
 import {
   validateKeystoreForm,
   validateKeystoreField,
@@ -124,6 +124,9 @@ export function StepThree({ onBack, onComplete }: StepThreeProps) {
       if (result.success) {
         toast.success('Wallet created successfully!');
         onComplete(formData.walletName);
+      } else if (result.cancelled) {
+        // Notify user cancelled save operation
+        toast.warning('Wallet file save cancelled');
       } else {
         toast.error(result.error || 'Failed to create wallet, please try again');
       }
@@ -156,7 +159,6 @@ export function StepThree({ onBack, onComplete }: StepThreeProps) {
                 value={formData.walletName}
                 onChange={(e) => handleInputChange('walletName', e.target.value)}
                 className={errors.walletName ? 'border-red-500' : ''}
-                required
               />
               {errors.walletName && <p className="text-sm text-red-500">{errors.walletName}</p>}
             </div>
@@ -172,21 +174,13 @@ export function StepThree({ onBack, onComplete }: StepThreeProps) {
                   value={formData.password}
                   onChange={(e) => handleInputChange('password', e.target.value)}
                   className={errors.password ? 'border-red-500' : ''}
-                  required
+                  autoComplete="off"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
+                <ToggleVisibilityButton
+                  isVisible={showPassword}
+                  onToggle={() => setShowPassword(!showPassword)}
                   className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  {showPassword ? (
-                    <IconEye className="h-4 w-4" />
-                  ) : (
-                    <IconEyeOff className="h-4 w-4" />
-                  )}
-                </Button>
+                />
               </div>
               {errors.password && <p className="text-sm text-red-500">{errors.password}</p>}
             </div>
@@ -202,21 +196,12 @@ export function StepThree({ onBack, onComplete }: StepThreeProps) {
                   value={formData.confirmPassword}
                   onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
                   className={errors.confirmPassword ? 'border-red-500' : ''}
-                  required
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
+                <ToggleVisibilityButton
+                  isVisible={showConfirmPassword}
+                  onToggle={() => setShowConfirmPassword(!showConfirmPassword)}
                   className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                >
-                  {showConfirmPassword ? (
-                    <IconEye className="h-4 w-4" />
-                  ) : (
-                    <IconEyeOff className="h-4 w-4" />
-                  )}
-                </Button>
+                />
               </div>
               {errors.confirmPassword && (
                 <p className="text-sm text-red-500">{errors.confirmPassword}</p>

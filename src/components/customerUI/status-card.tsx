@@ -1,82 +1,22 @@
-import { Card, CardDescription, CardTitle } from '@/components/ui/card';
+import { Card, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { AnimatedNumber } from '@/components/customerUI';
 import BigNumber from 'bignumber.js';
 
-import { useIsMobile } from '@/hooks/use-mobile';
-import AnimatedNumber from './AnimatedNumber';
-
-interface StatusCardProps {
-  title: string;
-  value: number | string;
-  isLoading?: boolean;
-  color?: 'green' | 'orange' | 'blue' | 'red' | 'gray';
-  className?: string;
-}
-
 interface AddressUsageCardProps {
-  used: number | string | BigNumber;
-  unused: number | string | BigNumber;
-  isLoading?: boolean;
+  used: number;
+  unused: number;
   className?: string;
 }
 
-const colorClasses = {
-  green: 'text-green-600',
-  orange: 'text-orange-600',
-  blue: 'text-blue-600',
-  red: 'text-red-600',
-  gray: 'text-gray-600',
-};
-
-export function StatusCard({
-  title,
-  value,
-  isLoading = false,
-  color = 'green',
-  className = '',
-}: StatusCardProps) {
-  return (
-    <Card className={className}>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 sm:px-6 py-3">
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-base sm:text-lg">{title}：</CardTitle>
-        </div>
-        <CardDescription
-          className={`text-xl sm:text-2xl font-bold break-words ${colorClasses[color]}`}
-        >
-          {isLoading ? '...' : value}
-        </CardDescription>
-      </div>
-    </Card>
-  );
-}
-
-export function AddressUsageCard({
-  used,
-  unused,
-  isLoading = false,
-  className = '',
-}: AddressUsageCardProps) {
-  // Convert to BigNumber for precise calculations
+export function AddressUsageCard({ used, unused, className }: AddressUsageCardProps) {
   const usedBN = new BigNumber(used);
   const unusedBN = new BigNumber(unused);
-  const totalBN = usedBN.plus(unusedBN);
-
-  // Calculate percentages using BigNumber
-  const usedPercentage = totalBN.isGreaterThan(0)
-    ? usedBN.dividedBy(totalBN).multipliedBy(100).toNumber()
-    : 0;
-  const unusedPercentage = totalBN.isGreaterThan(0)
-    ? unusedBN.dividedBy(totalBN).multipliedBy(100).toNumber()
-    : 0;
-
-  // Convert to numbers for display
-  const total = totalBN.toNumber();
-  const usedNumber = usedBN.toNumber();
-  const unusedNumber = unusedBN.toNumber();
-
-  const isMobile = useIsMobile();
+  const total = usedBN.plus(unusedBN);
+  const usedPercentage = total.isZero() ? 0 : usedBN.div(total).times(100).toNumber();
+  const unusedPercentage = total.isZero() ? 0 : unusedBN.div(total).times(100).toNumber();
   return (
-    <Card className={`p-4 sm:p-6 ${className}`}>
+    <Card className={cn('p-4 sm:p-6 w-full', className)}>
       <div className="space-y-4 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -96,36 +36,21 @@ export function AddressUsageCard({
               </svg>
             </div>
             <div>
-              <CardTitle className="text-base sm:text-lg">Address Usage Status</CardTitle>
+              <CardTitle className="text-base sm:text-lg">Address usage summary</CardTitle>
               <p className="text-xs sm:text-sm text-gray-500">
-                Address allocation and usage monitoring
+                Monitor address allocation and usage
               </p>
             </div>
           </div>
           <div className="text-left sm:text-right">
             <div className="text-2xl sm:text-3xl font-bold text-blue-600 leading-tight">
-              <AnimatedNumber value={total} duration={0.2} />
+              <AnimatedNumber value={total.toNumber()} duration={0.2} />
             </div>
-            <div className="text-xs sm:text-sm text-gray-500">Total Addresses</div>
+            <div className="text-xs sm:text-sm text-gray-500">Total addresses</div>
           </div>
         </div>
 
         <div className="space-y-3">
-          <div className="flex justify-between text-xs sm:text-sm">
-            <span className="text-orange-600 font-medium flex items-center gap-1">
-              <div className="w-2 h-2 bg-orange-500 rounded-full"></div>
-              {isMobile
-                ? usedNumber.toLocaleString()
-                : `Used Addresses: ${usedNumber.toLocaleString()}`}
-            </span>
-
-            <span className="text-green-600 font-medium flex items-center gap-1">
-              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-              {isMobile
-                ? unusedNumber.toLocaleString()
-                : `Unused Addresses: ${unusedNumber.toLocaleString()}`}
-            </span>
-          </div>
           <div className="w-full bg-gray-200 rounded-full h-3 sm:h-4 overflow-hidden shadow-inner">
             <div className="flex h-full">
               <div
@@ -162,9 +87,9 @@ export function AddressUsageCard({
               </svg>
             </div>
             <div className="text-xl sm:text-2xl font-bold text-orange-600">
-              {isLoading ? '...' : usedNumber.toLocaleString()}
+              <AnimatedNumber value={usedBN.toNumber()} duration={0.2} />
             </div>
-            <div className="text-xs sm:text-sm text-orange-700 font-medium">Used Addresses</div>
+            <div className="text-xs sm:text-sm text-orange-700 font-medium">Used addresses</div>
           </div>
           <div className="text-center p-3 sm:p-4 bg-gradient-to-br from-green-50 to-green-100 rounded-xl border border-green-200">
             <div className="w-7 h-7 sm:w-8 sm:h-8 bg-green-500 rounded-lg flex items-center justify-center mx-auto mb-2">
@@ -183,9 +108,9 @@ export function AddressUsageCard({
               </svg>
             </div>
             <div className="text-xl sm:text-2xl font-bold text-green-600">
-              {isLoading ? '...' : unusedNumber.toLocaleString()}
+              <AnimatedNumber value={unusedBN.toNumber()} duration={0.2} />
             </div>
-            <div className="text-xs sm:text-sm text-green-700 font-medium">Unused Addresses</div>
+            <div className="text-xs sm:text-sm text-green-700 font-medium">Unused addresses</div>
           </div>
         </div>
       </div>

@@ -1,5 +1,3 @@
-import type { UserInfo } from '@/types/global';
-
 export interface GenericServerResponse<Data = unknown> {
   code: number;
   message?: string;
@@ -7,6 +5,13 @@ export interface GenericServerResponse<Data = unknown> {
   nonce?: string;
   data?: Data;
   type?: string;
+}
+
+export interface UserInfo {
+  user_id: string;
+  username: string;
+  role: string;
+  merchant_id: string;
 }
 
 export interface PasskeyVerifyStartData {

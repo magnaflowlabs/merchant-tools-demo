@@ -1,6 +1,4 @@
-import type { ChainInfo } from '@/types/merchant';
-import type { UserInfo } from '@/types/global';
-
+import type { CollectionAddressInfo } from '@/types/merchant';
 export type AuthLoginArgs = {
   username: string;
   password: string;
@@ -32,6 +30,13 @@ export type CollectionHistory = {
   block_ms: string;
   user_id: string;
 };
+
+export interface UserInfo {
+  user_id: string;
+  username: string;
+  role: string;
+  merchant_id: string;
+}
 export type AuthLoginRes = {
   token: string;
   user_info: UserInfo;
@@ -68,7 +73,7 @@ export type MerchantProfile = {
   merchant_id: string;
   conn_url: string;
   api_url: string;
-  collection_addresses: ChainInfo[];
+  collection_addresses: CollectionAddressInfo[];
   re_url: string;
   admin_passwd: string;
   merchant_gpg_pub: string;

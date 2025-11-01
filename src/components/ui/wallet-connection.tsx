@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   IconWallet,
@@ -8,7 +9,6 @@ import {
   IconSwitch,
   IconRefresh,
 } from '@tabler/icons-react';
-import { useState, useEffect, useCallback } from 'react';
 import { useWalletModal } from '@tronweb3/tronwallet-adapter-react-ui';
 
 import {
@@ -19,9 +19,9 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useWallet } from '@tronweb3/tronwallet-adapter-react-hooks';
-import { USDT_CONTRACT_ADDRESSES } from '@/config/constants';
 import { truncateFromSun } from '@/lib/utils';
 import { useWalletListener } from '@/hooks/use-wallet-listener';
+import { useUsdtContract } from '@/hooks/use-token-contract';
 
 // Custom Wallet Select Button
 function CustomWalletSelectButton({ onClick }: { onClick: () => void }) {
@@ -45,7 +45,7 @@ export function WalletConnection() {
   const [copied, setCopied] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const { setVisible } = useWalletModal();
-
+  const getUsdtContractAddress = useUsdtContract();
   // Use Wallet Listener Service
   useWalletListener({
     onConnect: (newAddress) => {
@@ -91,16 +91,16 @@ export function WalletConnection() {
     setIsRefreshing(true);
     try {
       const tronWeb = window.tronWeb;
-      const userAddress = tronWeb.defaultAddress.base58;
-
       // Get TRX Balance
       const trx = await tronWeb.trx.getBalance(address);
       setTrxBalance(truncateFromSun(trx, 4));
 
       // Get USDT Balance
-      const usdtContract = await tronWeb.contract().at(USDT_CONTRACT_ADDRESSES.nile);
-      const usdt = await usdtContract.balanceOf(userAddress).call();
-      setUsdtBalance(truncateFromSun(usdt, 4));
+      if (getUsdtContractAddress) {
+        const usdtContract = await tronWeb.contract().at(getUsdtContractAddress);
+        const usdt = await usdtContract.balanceOf(address).call();
+        setUsdtBalance(truncateFromSun(usdt, 4));
+      }
     } catch (error) {
       console.error('Refresh balance failed:', error);
     } finally {

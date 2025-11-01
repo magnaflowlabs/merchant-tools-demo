@@ -1,5 +1,5 @@
 import { atomWithStorage, createJSONStorage } from 'jotai/utils';
-import type { UserInfo } from '@/types/global';
+import type { UserInfo } from '@/auth/types';
 
 // Use sessionStorage instead of localStorage for persistence
 const _sessionStorage = createJSONStorage<{

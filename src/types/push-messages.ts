@@ -1,4 +1,17 @@
-import type { PayinOrder, PayoutOrder } from './merchant';
+import type {
+  PayinOrder,
+  PayoutOrder,
+  ChainType,
+  LockStatus,
+  LockType,
+  AddressUsage,
+} from './merchant';
+
+// ==================== Base Push Messages ====================
+
+/**
+ * Base push message interface
+ */
 export interface BasePushMessage {
   method: string;
   type: 'push';
@@ -6,49 +19,69 @@ export interface BasePushMessage {
   data: any;
 }
 
+// ==================== Lock Information Types ====================
+
+/**
+ * Lock information
+ */
+export interface LockInfo {
+  status: LockStatus;
+  type: LockType;
+  prefixies: string[];
+}
+
+// ==================== Specific Push Message Types ====================
+
+/**
+ * Collection orders push message
+ */
 export interface CollectionOrdersPushMessage extends BasePushMessage {
   method: 'kit_collection_orders';
   data: {
-    chain: 'trx_nil' | 'trx';
+    chain: ChainType;
     total_records: number;
     list: PayinOrder[];
   };
 }
 
+/**
+ * Payout orders push message
+ */
 export interface PayoutOrdersPushMessage extends BasePushMessage {
   method: 'kit_payout_orders';
   data: {
-    chain: 'trx_nil' | 'trx';
+    chain: ChainType;
     total_records: number;
     list: PayoutOrder[];
   };
 }
 
+/**
+ * Lock status push message
+ */
 export interface LocksPushMessage extends BasePushMessage {
   method: 'kit_locks';
   data: {
     total_records: number;
-    list: Array<{
-      status: 'lock' | 'unlock';
-      type: 'collection_gas' | 'payout_order';
-      prefixies: string[];
-    }>;
+    list: LockInfo[];
   };
 }
 
+/**
+ * Address usage push message
+ */
 export interface AddressUsagePushMessage extends BasePushMessage {
   method: 'kit_address_usage';
   data: {
-    chain: 'trx_nil' | 'trx';
+    chain: ChainType;
     total_records: number;
-    list: Array<{
-      available: number;
-      allocated: number;
-      last_path: string;
-    }>;
+    list: AddressUsage[];
   };
 }
 
+/**
+ * Authentication terminated push message
+ */
 export interface AuthTerminatedPushMessage extends BasePushMessage {
   method: 'auth_terminated';
   data: {
@@ -58,6 +91,11 @@ export interface AuthTerminatedPushMessage extends BasePushMessage {
   };
 }
 
+// ==================== Union Types ====================
+
+/**
+ * Union type of all push messages
+ */
 export type PushMessage =
   | CollectionOrdersPushMessage
   | PayoutOrdersPushMessage
@@ -65,8 +103,16 @@ export type PushMessage =
   | AddressUsagePushMessage
   | AuthTerminatedPushMessage;
 
+// ==================== Handler Types ====================
+
+/**
+ * Push message handler
+ */
 export type PushMessageHandler<T extends PushMessage = PushMessage> = (message: T) => void;
 
+/**
+ * Push message handler mapping
+ */
 export interface PushMessageHandlers {
   kit_collection_orders?: PushMessageHandler<CollectionOrdersPushMessage>;
   kit_payout_orders?: PushMessageHandler<PayoutOrdersPushMessage>;
@@ -74,15 +120,4 @@ export interface PushMessageHandlers {
   kit_address_usage?: PushMessageHandler<AddressUsagePushMessage>;
   auth_terminated?: PushMessageHandler<AuthTerminatedPushMessage>;
   [key: string]: PushMessageHandler<any> | undefined;
-}
-
-export function isPushMessage(data: any): data is BasePushMessage {
-  return (
-    data &&
-    typeof data === 'object' &&
-    typeof data.method === 'string' &&
-    data.type === 'push' &&
-    typeof data.nonce === 'string' &&
-    data.data !== undefined
-  );
 }

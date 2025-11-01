@@ -1,9 +1,10 @@
 import { useMemo } from 'react';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
-import { useAuthStore, useWalletStore, useSyncConfigStore } from '@/stores';
+import { useAuthStore, useWalletStore, useSyncConfigStore, useShallow } from '@/stores';
 import { IconHelp } from '@tabler/icons-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+
 import { AddressUsageStatus } from '@/components/address-usage-status';
 import { WorkAutoButton } from '@/components/customerUI';
 import { Button } from '@/components/ui/button';
@@ -11,10 +12,27 @@ import { Upload } from 'lucide-react';
 import { kitUpdateProfile, kitGetProfile } from '@/services/ws/api';
 import { toast } from 'sonner';
 import type { MerchantProfile } from '@/services/ws/type';
-
+import { useChainConfigStore } from '@/stores/chain-config-store';
+import { useWebSocketService } from '@/services/ws/hooks';
+import { KeystoreWalletButton } from '@/components/keystore-wallet-button';
 export function SyncAddressStatus() {
-  const { isAdmin, user, cur_chain, setUser, setCurChain } = useAuthStore();
-  const { isWalletImported, keystore_id } = useWalletStore();
+  const { isAdmin, setProfileData, profileData } = useAuthStore(
+    useShallow((state) => ({
+      isAdmin: state.isAdmin,
+      setProfileData: state.setProfileData,
+      profileData: state.profileData,
+    }))
+  );
+  const { ws } = useWebSocketService();
+  // Get current chain from chain config store
+  const curChainConfig = useChainConfigStore((state) => state.curChainConfig);
+  const { isWalletImported, keystore_id } = useWalletStore(
+    useShallow((state) => ({
+      isWalletImported: state.isWalletImported,
+      keystore_id: state.keystore_id,
+    }))
+  );
+
   const {
     minSubAccountThreshold,
     autoGenerateAddressCount,
@@ -22,14 +40,23 @@ export function SyncAddressStatus() {
     setMinSubAccountThreshold,
     setAutoGenerateAddressCount,
     setIsSyncingAddress,
-  } = useSyncConfigStore();
+  } = useSyncConfigStore(
+    useShallow((state) => ({
+      minSubAccountThreshold: state.minSubAccountThreshold,
+      autoGenerateAddressCount: state.autoGenerateAddressCount,
+      isSyncingAddress: state.isSyncingAddress,
+      setMinSubAccountThreshold: state.setMinSubAccountThreshold,
+      setAutoGenerateAddressCount: state.setAutoGenerateAddressCount,
+      setIsSyncingAddress: state.setIsSyncingAddress,
+    }))
+  );
 
   const handleAddressList = async () => {
     setIsSyncingAddress(!isSyncingAddress);
   };
   const isValidKeystore = useMemo(() => {
-    return user?.keystore_id === keystore_id;
-  }, [user?.keystore_id, keystore_id]);
+    return profileData?.keystore_id === keystore_id;
+  }, [keystore_id, profileData?.keystore_id]);
 
   const handleBindKeystoreId = async () => {
     if (!keystore_id) {
@@ -42,34 +69,20 @@ export function SyncAddressStatus() {
         const response = await kitGetProfile();
 
         if (response?.code === 200 && response?.data) {
-          const profileData = response?.data as MerchantProfile;
+          const profileDataRes = response?.data as MerchantProfile;
 
-          if (user) {
-            setUser({
-              ...user,
-              keystore_id: profileData.keystore_id,
-              merchant_id: profileData?.merchant_id,
-              collection_addresses: profileData?.collection_addresses || [],
-            });
-            if (profileData?.collection_addresses?.length > 0) {
-              const isCurChain = profileData?.collection_addresses?.find(
-                (addr) => addr.chain === cur_chain?.chain
-              );
-              if (cur_chain?.chain && isCurChain) {
-                setCurChain(isCurChain);
-              } else {
-                setCurChain(profileData.collection_addresses[0]);
-              }
-            }
+          if (profileDataRes) {
+            // Only update user info, curCollectionAddressInfo will be automatically derived via useCollectionAddressInfo
+            setProfileData(profileDataRes);
           }
         } else {
-          console.error('Get configuration failed: ' + (response?.error || 'Unknown error'));
+          console.error('Failed to get configuration: ' + (response?.error || 'Unknown error'));
         }
       }
     } catch (error: any) {
       console.error(typeof error);
       if (error?.code === 409) {
-        toast.error('This keystore file is already in use by someone else.', {
+        toast.error('This keystore file is already in use by another user', {
           style: {
             width: 'auto',
             whiteSpace: 'pre',
@@ -80,16 +93,13 @@ export function SyncAddressStatus() {
       }
     }
   };
-
   return (
     <div className="space-y-6">
-      <h2 className="text-xl sm:text-2xl font-bold mb-4">Sync Address Status</h2>
-
       {isAdmin && (
         <div className="flex items-center gap-4 p-4 border rounded-lg bg-background flex-wrap ">
           <div className="flex items-center gap-3">
             <label htmlFor="auto-generate" className="text-sm font-medium">
-              Allow Auto Generate Address
+              Auto-generate addresses
             </label>
             <Input
               id="auto-generate"
@@ -113,7 +123,7 @@ export function SyncAddressStatus() {
           <Separator orientation="vertical" className="!h-[26px] bg-neutral-600 hidden md:block" />
           <div className="flex items-center gap-3">
             <label htmlFor="min-sub-account-threshold" className="text-sm font-medium">
-              When Unused Addresses Below
+              When unused addresses fall below
             </label>
             <Input
               id="min-sub-account-threshold"
@@ -136,21 +146,34 @@ export function SyncAddressStatus() {
 
           <div className="flex items-center gap-2">
             <div className="relative flex items-center gap-2">
-              <WorkAutoButton
-                isActive={isSyncingAddress}
-                onToggle={handleAddressList}
-                startLabel="Auto Sync"
-                stopLabel="Stop Sync"
-                disabled={!isWalletImported || !isValidKeystore || !cur_chain.chain}
-              />
-              {!user?.keystore_id && isWalletImported && (
+              {isWalletImported && (
+                <WorkAutoButton
+                  isActive={isSyncingAddress}
+                  onToggle={handleAddressList}
+                  startLabel="Auto Sync"
+                  stopLabel="Stop Sync"
+                  disabled={!isWalletImported || !isValidKeystore || !curChainConfig.chain}
+                />
+              )}
+              {/* <button
+                onClick={() => {
+                  ws.disconnect();
+                }}
+                className="px-2 py-1 rounded border text-xs"
+              >
+                Disconnect WS Service
+              </button> */}
+              {!profileData?.keystore_id && isWalletImported && ws.isConnected() && (
                 <Button onClick={handleBindKeystoreId} className="flex items-center gap-2">
                   <Upload className="h-4 w-4" />
                   Bind Keystore ID
                 </Button>
               )}
+              {!isWalletImported && (
+                <KeystoreWalletButton className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 hover:text-white" />
+              )}
             </div>
-            {!(isWalletImported && isValidKeystore && cur_chain.chain) && (
+            {!(isWalletImported && isValidKeystore && curChainConfig.chain) && (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <IconHelp className="h-5 w-5" />

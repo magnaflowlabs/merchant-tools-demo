@@ -9,7 +9,7 @@ export function stringToBytes32(str: string): string {
 export function validateBytes32(value: string): string {
   const regex = /^[0-9a-fA-F]{64}$/;
   if (!regex.test(value)) {
-    throw new Error(`bytes32（need 64 hex characters）: ${value}`);
+    throw new Error(`bytes32 (need 64 hex characters): ${value}`);
   }
   return value;
 }

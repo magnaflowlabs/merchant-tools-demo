@@ -2,29 +2,41 @@ import { useState, useCallback, useRef, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { StatCard } from '@/components/ui/stat-card';
-import { IconX } from '@tabler/icons-react';
 import { PaymentDataTable } from './payment-data-table';
 import type { PaymentDataTableRef } from './payment-data-table';
 import { PayoutHistory } from './payout-history';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { WorkAutoButton } from '@/components/customerUI';
-import { PayoutOrderStatus } from '@/stores/order-store';
+import { PayoutOrderStatus, type ExtendedPayoutOrder } from '@/stores/order-store';
 import { IconHelp } from '@tabler/icons-react';
 import { useMerchantStore } from '@/stores/merchant-store';
 import { useOrderStore } from '@/stores/order-store';
+import { useSelectionStore } from '@/stores/selection-store';
 import BigNumber from 'bignumber.js';
 import { useWallet } from '@tronweb3/tronwallet-adapter-react-hooks';
 import { useAuthStore } from '@/stores/auth-store';
-import { merchantLockPayoutOrder } from '@/services/ws/api';
+import {
+  merchantLockPayoutOrder,
+  merchantUnlockPayoutOrder,
+  merchantIsLockedPayoutOrder,
+} from '@/services/ws/api';
 import { useWebSocketService } from '@/services/ws';
-import { formatNumber } from '@/utils';
+import { formatNumber, isUserCancelledError, getErrorMessage } from '@/utils';
 import { payout_new_abi } from '@/constants/payout_abi_v2';
 import { stringToBytes32 } from '@/utils/bytes32-utils';
 import { usePrivateKeyConnection } from '@/hooks/use-private-key-connection';
-import { getTronWebInstance } from '@/utils/tronweb-manager';
+import { useTronWeb } from '@/hooks/use-tronweb';
 import { toast } from 'sonner';
 import { TronWeb } from 'tronweb';
+import { useUsdtContract } from '@/hooks/use-token-contract';
+import { useShallow } from 'zustand/react/shallow';
+import { RECHARGE_CONFIG } from '@/config/constants';
+import { useCollectionAddressInfo } from '@/hooks/use-collection-address-info';
 import { useChainConfigStore } from '@/stores/chain-config-store';
+import { WalletConnectionByAddress } from '@/components/private-wallet';
+import { WalletConnection } from '@/components/ui/wallet-connection';
+import { delay_fn } from '@/lib/utils';
+
 export function PaymentTool() {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [isPaying, setIsPaying] = useState(false);
@@ -35,8 +47,10 @@ export function PaymentTool() {
     getPrivateKey,
   } = usePrivateKeyConnection();
   const paymentDataTableRef = useRef<PaymentDataTableRef>(null);
-  const { user, cur_chain } = useAuthStore();
-  const { chainConfigs } = useChainConfigStore();
+  const user = useAuthStore((state) => state.user);
+  const curCollectionAddressInfo = useCollectionAddressInfo();
+  const curChainConfig = useChainConfigStore((state) => state.curChainConfig);
+
   const {
     isPaying: merchantIsPaying,
     isAutoPaying,
@@ -44,72 +58,76 @@ export function PaymentTool() {
     clearError,
     startAutoPaying,
     stopAutoPaying,
-  } = useMerchantStore();
-  const { payoutOrders, getSelectedPayoutOrders, updatePayoutOrdersStatus, selectAllPayoutOrders } =
-    useOrderStore();
+  } = useMerchantStore(
+    useShallow((state) => ({
+      isPaying: state.isPaying,
+      isAutoPaying: state.isAutoPaying,
+      error: state.error,
+      clearError: state.clearError,
+      startAutoPaying: state.startAutoPaying,
+      stopAutoPaying: state.stopAutoPaying,
+    }))
+  );
+  const payoutOrdersVersion = useOrderStore((state) => state.payoutOrders.version);
+  const payoutOrdersStatusManager = useOrderStore(
+    useShallow((state) => state.payoutOrdersStatusManager)
+  );
+  const updatePayoutOrdersStatus = useOrderStore((state) => state.updatePayoutOrdersStatus);
+  const payoutOrdersStats = useOrderStore((state) => state.payoutOrdersStats);
+
+  const payoutOrders = useMemo(() => {
+    return useOrderStore.getState().payoutOrders;
+  }, [payoutOrdersVersion]);
+
+  const { clearPayoutSelection, setPayoutSelectedMany } = useSelectionStore();
 
   const { ws } = useWebSocketService();
   const isWalletConnected = connected || privateKeyConnected;
   const currentAddress = address || publicKeyAddress;
-  const curUsdtContractAddress = useMemo(() => {
-    const curChain = chainConfigs.find((config) => config.chain === cur_chain.chain);
-    return curChain?.tokens?.find((token) => token.name === 'usdt')?.contract_addr;
-  }, [chainConfigs, cur_chain.chain]);
+  const curUsdtContractAddress = useUsdtContract();
+  const tronWebInstance = useTronWeb();
+  const executeBatchPayout = async (
+    selectedOrders: ExtendedPayoutOrder[],
+    forcePrivateKey: boolean = false
+  ): Promise<{ success: boolean; message: string } | undefined> => {
+    if (!isWalletConnected) {
+      throw new Error('Please connect wallet first');
+    }
 
-  // Common payment processing logic
-  const processPaymentOrders = async (
-    orders: any[],
-    isAutoMode: boolean = false
-  ): Promise<{ success: boolean; message?: string; txHash?: string }> => {
-    if (orders.length === 0) {
-      throw new Error('No orders to process');
+    if (forcePrivateKey && (!privateKeyConnected || connected)) {
+      throw new Error('Auto payment requires private key wallet only');
     }
 
     if (!ws.isConnected()) {
       throw new Error('WebSocket not connected');
     }
-
-    // Lock orders
-    const orderIdentifiers = orders.map((order) => order.bill_no);
-    const lockResp = await merchantLockPayoutOrder(orderIdentifiers, cur_chain.chain);
-    let validAddresByLockedApi: string[] = [];
-    if (lockResp.code === 200 && lockResp.data) {
-      validAddresByLockedApi = lockResp.data?.prefixies || [];
-    }
-    if (validAddresByLockedApi?.length === 0) {
-      throw new Error("Current selected orders's is locked, please try again later");
-    }
-
-    // Filter and transform orders
-    const selectedOrdersFiltered = orders.filter((order) =>
-      validAddresByLockedApi.includes(order.bill_no)
+    const orderBillNosFiltered = selectedOrders
+      .filter(
+        (order) => order.bill_no.length <= 32 && !payoutOrdersStatusManager.get(order.bill_no)
+      )
+      .map((order) => order.bill_no);
+    const isLockedPayoutOrderResp = await merchantIsLockedPayoutOrder(
+      orderBillNosFiltered,
+      curChainConfig.chain
     );
-    const selectedOrdersNew: { billNo: string; to: string; amount: number }[] =
-      selectedOrdersFiltered.map((order) => {
-        return {
-          billNo: order.bill_no,
-          to: order.to,
-          amount: Math.floor(parseFloat(String(order.amount)) * 1e6),
-        };
-      });
-
-    if (!isWalletConnected) {
-      throw new Error('Please connect wallet first');
+    let preLockedData: string[] = [];
+    if (isLockedPayoutOrderResp.code === 200 && isLockedPayoutOrderResp.data) {
+      preLockedData = isLockedPayoutOrderResp.data?.prefixies || [];
     }
 
-    // Update status to processing
-    updatePayoutOrdersStatus(validAddresByLockedApi, { status: PayoutOrderStatus.Processing });
+    if (preLockedData.length === 0) {
+      await delay_fn();
+      return;
+    }
 
-    // Setup TronWeb
     let tronweb = window.tronWeb;
-
     if (privateKeyConnected && !connected) {
       const privateKey = getPrivateKey();
       if (!privateKey) {
         throw new Error('Private key not found');
       }
 
-      tronweb = getTronWebInstance('nile');
+      tronweb = tronWebInstance;
       tronweb.setPrivateKey(privateKey);
       tronweb.setAddress(currentAddress || '');
     }
@@ -126,7 +144,6 @@ export function PaymentTool() {
       throw new Error('Wallet address not found or usdt contract address not found');
     }
 
-    // Validate current address format
     if (!tronweb.isAddress(currentAddress)) {
       throw new Error(`Invalid wallet address format: ${currentAddress}`);
     }
@@ -134,87 +151,146 @@ export function PaymentTool() {
     if (!user?.merchant_id) {
       throw new Error('Merchant ID not found');
     }
-
-    // Setup contracts
     const contract = await tronweb.contract().at(curUsdtContractAddress);
-    const contract2 = tronweb.contract(payout_new_abi, cur_chain.payout_contract_address);
+    const payOutContract = tronweb.contract(
+      payout_new_abi,
+      curCollectionAddressInfo.payout_contract_address
+    );
 
-    // Get allowance and calculate fees
     const getAllowance = await contract
-      .allowance(currentAddress, cur_chain.payout_contract_address)
+      .allowance(currentAddress, curCollectionAddressInfo.payout_contract_address)
       .call();
-    const totalAmount = orders.reduce((acc, cur) => BigNumber(acc).plus(cur.amount).toNumber(), 0);
+
+    const selectedOrdersFiltered = preLockedData.map(
+      (item_bn) => selectedOrders.find((order) => order.bill_no === item_bn)!
+    );
+
+    if (selectedOrdersFiltered?.length === 0) {
+      throw new Error('No valid orders found');
+    }
+    const totalAmount = selectedOrdersFiltered.reduce(
+      (acc, cur) => BigNumber(acc).plus(cur.amount).toNumber(),
+      0
+    );
+
+    const usdt = await contract.balanceOf(currentAddress).call();
+
     const totalAmountInWei = TronWeb.toSun(totalAmount);
-    const getTotalFeeForOrders = await contract2
+    if (BigNumber(usdt).lte(BigNumber(totalAmountInWei))) {
+      toast.error('Insufficient balance, please recharge your wallet first');
+      if (forcePrivateKey) {
+        try {
+          stopAutoPaying();
+          // await merchantUnlockPayoutOrder(preLockedData, curChainConfig.chain);
+        } catch (unlockError) {
+          console.error('Failed to unlock orders after insufficient balance:', unlockError);
+        }
+      }
+      return;
+    }
+    const getTotalFeeForOrders = await payOutContract
       .getTotalFeeFor(
         curUsdtContractAddress,
-        validAddresByLockedApi.length,
+        preLockedData.length,
         BigNumber(totalAmountInWei).toNumber(),
         currentAddress
       )
       .call();
 
-    // Approve if needed
     if (
       BigNumber(getAllowance.toString()).lt(BigNumber(totalAmountInWei).plus(getTotalFeeForOrders))
     ) {
-      const approveAmount = BigNumber(totalAmountInWei).plus(getTotalFeeForOrders).toString();
-      const hash = await contract
-        .approve(cur_chain.payout_contract_address, approveAmount)
-        .send(isAutoMode ? { feeLimit: 1000000000 } : {});
+      const approveParams = {
+        feeLimit: RECHARGE_CONFIG.FEE_LIMIT,
+      };
 
-      // For auto mode, wait for approval confirmation
-      if (isAutoMode) {
-        let data: any;
+      try {
+        const hash = await contract
+          .approve(
+            curCollectionAddressInfo.payout_contract_address,
+            BigNumber(totalAmountInWei).plus(getTotalFeeForOrders).toString()
+          )
+          .send(approveParams);
+
+        let approveReceipt: any;
         while (true) {
-          data = await tronweb.trx.getTransactionInfo(hash);
-          if (data && data.receipt) {
+          approveReceipt = await tronweb.trx.getTransactionInfo(hash);
+          if (approveReceipt?.receipt) {
             break;
           }
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await delay_fn();
         }
-        if (data && data.receipt && data.receipt.result != 'SUCCESS') {
-          throw new Error('Approval transaction failed');
+
+        if (approveReceipt.receipt?.result !== 'SUCCESS') {
+          throw new Error('Authorization transaction failed');
         }
+      } catch (error) {
+        if (isUserCancelledError(error)) {
+          throw new Error('User cancelled authorization');
+        }
+
+        throw new Error(getErrorMessage(error) || 'Authorization transaction failed');
       }
     }
 
-    // Create orders array with validation
-    const ordersArray: [string, string, number][] = selectedOrdersNew.map((item) => {
-      if (!item.to || item.to.trim() === '') {
-        throw new Error(`Invalid target address for bill ${item.billNo}: address is empty`);
-      }
-      if (!item.billNo || item.billNo.trim() === '') {
-        throw new Error(`Invalid bill number: billNo is empty`);
-      }
-      if (item.amount <= 0) {
-        throw new Error(`Invalid amount for bill ${item.billNo}: amount must be greater than 0`);
-      }
+    const payoutOrderLockedResp = await merchantLockPayoutOrder(
+      preLockedData,
+      curChainConfig.chain
+    );
+    let realLockedData: string[] = [];
+    if (payoutOrderLockedResp.code === 200 && payoutOrderLockedResp.data) {
+      realLockedData = payoutOrderLockedResp.data?.prefixies || [];
+    }
 
-      return [stringToBytes32(item.billNo), item.to, item.amount];
-    });
+    const afterLockedOrdersFiltered = realLockedData.map(
+      (item_bn) => selectedOrders.find((order) => order.bill_no === item_bn)!
+    );
+    if (afterLockedOrdersFiltered?.length === 0) {
+      await delay_fn();
+      return;
+    }
 
-    // Execute batch transfer
-    const merchantIdBytes32 = stringToBytes32(user?.merchant_id);
-    const result = await contract2
-      .batchTransfer(merchantIdBytes32, curUsdtContractAddress, ordersArray, false)
-      .send(isAutoMode ? { feeLimit: 1000000000 } : {});
-
-    if (result) {
-      updatePayoutOrdersStatus(validAddresByLockedApi, {
-        status: PayoutOrderStatus.Confirming,
-        txHash: result,
-        isLocked: true,
+    const afterLockedOrdersNew: { billNo: string; to: string; amount: number }[] =
+      afterLockedOrdersFiltered.map((order) => {
+        return {
+          billNo: order.bill_no,
+          to: order.to,
+          amount: BigNumber(order.amount).multipliedBy(1e6).toNumber(),
+        };
       });
-      selectAllPayoutOrders(false);
-      return {
-        success: true,
-        message: 'Payment successful',
-        txHash: result,
-      };
-    } else {
-      updatePayoutOrdersStatus(validAddresByLockedApi, { status: PayoutOrderStatus.Pending });
-      throw new Error('Transaction broadcast failed, but no specific reason was provided.');
+
+    const ordersArray: [string, string, number][] = afterLockedOrdersNew.map(
+      ({ billNo, to, amount }) => [stringToBytes32(billNo), to, amount]
+    );
+
+    const merchantIdBytes32 = stringToBytes32(user.merchant_id);
+
+    try {
+      const result = await payOutContract
+        .batchTransfer(merchantIdBytes32, curUsdtContractAddress, ordersArray, false)
+        .send({ feeLimit: RECHARGE_CONFIG.FEE_LIMIT });
+
+      if (result) {
+        updatePayoutOrdersStatus(realLockedData, {
+          status: PayoutOrderStatus.Confirming,
+          isLocked: true,
+        });
+        clearPayoutSelection();
+        return {
+          success: true,
+          message: 'Payment successful',
+        };
+      } else {
+        throw new Error('Transaction broadcast failed, no transaction hash returned');
+      }
+    } catch (error) {
+      if (isUserCancelledError(error)) {
+        await merchantUnlockPayoutOrder(realLockedData, curChainConfig.chain);
+        throw new Error('User cancelled transaction');
+      }
+
+      const errorMsg = getErrorMessage(error);
+      throw new Error(errorMsg || 'Transaction failed');
     }
   };
 
@@ -223,26 +299,26 @@ export function PaymentTool() {
       toast.warning('Please select orders first');
       return;
     }
+
+    if (isPaying) {
+      toast.warning('Payment is in progress, please wait...');
+      return;
+    }
+
     setIsPaying(true);
     try {
-      const selectedOrders = getSelectedPayoutOrders();
-      if (selectedOrders.length === 0) {
-        throw new Error('No selected orders data found');
-      }
-
-      try {
-        const result = await processPaymentOrders(selectedOrders, false);
-        return result;
-      } catch (error) {
-        if (error instanceof Error) {
-          toast.error(error.message);
-        } else {
-          console.error('Payment failed:', error);
-        }
-        throw error;
-      }
+      const selectedOrders = selectedItems.map((bill_no) => payoutOrders.get(bill_no)!);
+      await executeBatchPayout(selectedOrders, false);
+      setPayoutSelectedMany(selectedItems, false);
     } catch (error) {
-      // Handle batch payment error
+      if (isUserCancelledError(error)) {
+        toast.warning(getErrorMessage(error));
+      } else if (error instanceof Error) {
+        toast.error(error.message);
+      } else {
+        console.error('Payment failed:', error);
+        toast.error('Payment failed, please try again');
+      }
     } finally {
       setIsPaying(false);
     }
@@ -250,7 +326,8 @@ export function PaymentTool() {
 
   const handleAutoPayOut = async () => {
     if (!privateKeyConnected || connected) {
-      throw new Error('Auto payment is only available for private key wallet');
+      toast.error('Auto payment is only available for private key wallet');
+      return;
     }
 
     if (isAutoPaying) {
@@ -261,47 +338,52 @@ export function PaymentTool() {
     startAutoPaying();
 
     try {
-      // Auto payment logic - continuously process pending orders
       const processPendingOrders = async () => {
         let isWorking = false;
+
         while (true) {
           if (isWorking) {
             continue;
           }
-          // Check if auto paying is still enabled at the start of each iteration
           const { isAutoPaying: currentAutoPaying } = useMerchantStore.getState();
           if (!currentAutoPaying) {
             break;
           }
-          // Get fresh payoutOrders data from store on each iteration
-          const { payoutOrders: currentPayoutOrders } = useOrderStore.getState();
-          const pendingOrders = Array.from(currentPayoutOrders.values()).filter(
-            (order) => order.status === PayoutOrderStatus.Pending
-          );
+          const { payoutOrders: currentPayoutOrders, payoutOrdersStatusManager: statusMgr } =
+            useOrderStore.getState();
+          const pendingOrders: ExtendedPayoutOrder[] = [];
+          for (const order of currentPayoutOrders.valuesInOrder()) {
+            if (
+              statusMgr.get(order.bill_no)?.status === PayoutOrderStatus.Pending ||
+              !statusMgr.get(order.bill_no)?.status
+            ) {
+              pendingOrders.push(order);
+            }
+          }
 
           if (pendingOrders.length === 0) {
-            // No pending orders, wait a bit before checking again
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            await delay_fn();
             continue;
           }
 
-          // Process the batch payment
+          if (!ws.isConnected()) {
+            toast.warning('WebSocket not connected, stopping auto payment');
+            stopAutoPaying();
+            break;
+          }
+
+          const batchSize = Math.min(RECHARGE_CONFIG.BATCH_SIZE, pendingOrders.length);
+          const currentBatch = pendingOrders.slice(0, batchSize);
+          isWorking = true;
           try {
-            isWorking = true;
-            await processPaymentOrders(pendingOrders, true);
+            await executeBatchPayout(currentBatch, true);
           } catch (error) {
             console.error('Auto payment batch failed:', error);
-            // Continue processing other orders even if one batch fails
+            stopAutoPaying();
           } finally {
             isWorking = false;
           }
-          // Wait before processing next batch
-          await new Promise((resolve) => setTimeout(resolve, 5000));
-          // Additional check to ensure we're still in auto-pay mode
-          const { isAutoPaying: stillAutoPaying } = useMerchantStore.getState();
-          if (!stillAutoPaying) {
-            break;
-          }
+          await delay_fn(5000);
         }
       };
 
@@ -315,31 +397,51 @@ export function PaymentTool() {
   const handleTableSelectionChange = useCallback((selectedIds: string[]) => {
     setSelectedItems(selectedIds);
   }, []);
+  const unlockOrders = async () => {
+    const payoutOrders22 = Array.from(payoutOrders.valuesInOrder()).filter((order) => {
+      return order.status === PayoutOrderStatus.Locked;
+    });
+    const lockedBillNos = payoutOrders22.map((order) => order.bill_no);
 
+    if (lockedBillNos.length === 0) {
+      toast.info('No orders to unlock');
+      return;
+    }
+
+    const BATCH_LIMIT = 800;
+    const total = lockedBillNos.length;
+    let successBatches = 0;
+    let failedBatches = 0;
+
+    for (let i = 0; i < total; i += BATCH_LIMIT) {
+      const batch = lockedBillNos.slice(i, i + BATCH_LIMIT);
+      try {
+        const resp = await merchantUnlockPayoutOrder(batch, curChainConfig.chain);
+        if (resp?.code === 200) {
+          successBatches += 1;
+        } else {
+          failedBatches += 1;
+        }
+      } catch (e) {
+        console.error('unlock batch error', e);
+        failedBatches += 1;
+      }
+    }
+
+    if (failedBatches === 0) {
+      toast.success(`Unlock completed, ${successBatches} batches, total ${total} orders`);
+    } else if (successBatches === 0) {
+      toast.error('Unlock failed: all batches failed');
+    } else {
+      toast.warning(
+        `Partial unlock successful: ${successBatches} successful, ${failedBatches} failed`
+      );
+    }
+  };
   return (
     <div className="space-y-6">
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <IconX className="h-4 w-4 text-red-500" />
-              <span className="text-red-700">{error}</span>
-            </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearError}
-              className="text-red-500 hover:text-red-700"
-            >
-              Close
-            </Button>
-          </div>
-        </div>
-      )}
-
       <div className="flex items-start gap-6">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold mb-2">Payment Tool</h2>
           <p className="text-muted-foreground">
             Batch process payment transactions to improve payment efficiency
           </p>
@@ -358,30 +460,31 @@ export function PaymentTool() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2  gap-4">
-        <StatCard title={`Unpaid Orders`} value={Number(payoutOrders.size)} color="blue" />
         <StatCard
-          title={`Unpaid Amount (USDT)`}
-          value={formatNumber(
-            Array.from(payoutOrders.values()).reduce(
-              (acc, order) => BigNumber(acc).plus(order.amount).toNumber(),
-              0
-            )
-          )}
+          title={`Unpaid orders`}
+          value={formatNumber(payoutOrdersStats.totalCount)}
+          color="blue"
+        />
+        <StatCard
+          title={`Unpaid amount (USDT)`}
+          value={formatNumber(payoutOrdersStats.totalAmount)}
           color="green"
         />
       </div>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            Payment Data
-            <Button
-              className="ml-4"
-              variant="default"
-              onClick={handleBatchPayOut}
-              disabled={selectedItems.length === 0 || !isWalletConnected}
-            >
-              {`${isPaying ? 'Paying...' : 'Manual Payment'} (${selectedItems.length})`}
-            </Button>
+            Pending payment addresses
+            {(privateKeyConnected || connected) && (
+              <Button
+                className="ml-4"
+                variant="default"
+                onClick={handleBatchPayOut}
+                disabled={selectedItems.length === 0 || !isWalletConnected || isPaying}
+              >
+                {`${isPaying ? 'Paying...' : 'Manual Payment'} (${selectedItems.length})`}
+              </Button>
+            )}
             {privateKeyConnected && !connected && (
               <>
                 <WorkAutoButton
@@ -395,7 +498,7 @@ export function PaymentTool() {
             )}
             {!isWalletConnected && (
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger asChild onClick={unlockOrders}>
                   <IconHelp className="h-5 w-5" />
                 </TooltipTrigger>
                 <TooltipContent>
@@ -403,10 +506,15 @@ export function PaymentTool() {
                 </TooltipContent>
               </Tooltip>
             )}
+            {!(privateKeyConnected || connected) && (
+              <div className="flex items-center gap-4">
+                <WalletConnectionByAddress />
+                <div className="h-4 w-px bg-border" />
+                <WalletConnection />
+              </div>
+            )}
           </CardTitle>
-          <CardDescription>
-            Select payment orders to process, supports batch operations
-          </CardDescription>
+          <CardDescription>Select payment orders for batch processing with ease</CardDescription>
         </CardHeader>
         <CardContent>
           <PaymentDataTable

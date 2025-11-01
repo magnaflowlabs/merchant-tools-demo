@@ -1,4 +1,4 @@
-export { PasskeyDialog } from './PasskeyDialog';
+export { PasskeyDialog } from './passkey-dialog';
 
 export type {
   PasskeyMode,

@@ -5,12 +5,18 @@ import { StepThree } from './wallet-steps/step-three';
 import { SuccessStep } from './wallet-steps/success-step';
 
 import { useWalletStore } from '@/stores/wallet-store';
+import { useShallow } from 'zustand/react/shallow';
 import { toast } from 'sonner';
 
 type Step = 'one' | 'two' | 'three' | 'success';
 
 export function CreateWallet() {
-  const { setTempMnemonic, clearTempMnemonic } = useWalletStore();
+  const { setTempMnemonic, clearTempMnemonic } = useWalletStore(
+    useShallow((state) => ({
+      setTempMnemonic: state.setTempMnemonic,
+      clearTempMnemonic: state.clearTempMnemonic,
+    }))
+  );
   const [currentStep, setCurrentStep] = useState<Step>('one');
   const [walletName, setWalletName] = useState('');
   const handleStartCreate = () => {
@@ -28,6 +34,7 @@ export function CreateWallet() {
 
   const handleBackToStepOne = () => {
     setCurrentStep('one');
+    clearTempMnemonic();
   };
 
   const handleComplete = (name: string) => {
@@ -60,7 +67,7 @@ export function CreateWallet() {
 
   return (
     <div className="flex flex-col gap-6 p-8 lg:px-6">
-      <div className="min-w-3xl mx-auto">
+      <div className="min-w-4xl mx-auto">
         <h1 className="text-2xl font-bold mb-4">Create New Wallet</h1>
 
         <div className="flex items-center gap-4 mb-6">
@@ -76,7 +83,7 @@ export function CreateWallet() {
             >
               1
             </div>
-            <span className="text-sm">Start Creation</span>
+            {/* <span className="text-sm">Start Creation</span> */}
           </div>
 
           <div className={`flex-1 h-px bg-border`}></div>
@@ -93,7 +100,7 @@ export function CreateWallet() {
             >
               2
             </div>
-            <span className="text-sm">Backup Mnemonic</span>
+            {/* <span className="text-sm">Backup Mnemonic</span> */}
           </div>
 
           <div className={`flex-1 h-px bg-border`}></div>
@@ -110,7 +117,7 @@ export function CreateWallet() {
             >
               3
             </div>
-            <span className="text-sm">Setup Information</span>
+            {/* <span className="text-sm">Setup Information</span> */}
           </div>
 
           <div className={`flex-1 h-px bg-border`}></div>
@@ -127,7 +134,7 @@ export function CreateWallet() {
             >
               ✓
             </div>
-            <span className="text-sm">Creation Complete</span>
+            {/* <span className="text-sm">Creation Complete</span> */}
           </div>
         </div>
 

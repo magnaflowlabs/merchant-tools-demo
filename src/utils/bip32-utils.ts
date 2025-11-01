@@ -4,7 +4,9 @@ import { HDNodeWallet, Wallet } from 'ethers';
 import * as ecc from 'tiny-secp256k1';
 import { getTronWebInstance } from './tronweb-manager';
 import { useWalletStore } from '@/stores/wallet-store';
+import { useChainConfigStore } from '@/stores/chain-config-store';
 
+import { workerManager } from '@/services/WorkerManager';
 export const initBip32 = async (): Promise<any> => {
   try {
     const ecc = await import('tiny-secp256k1');
@@ -55,16 +57,15 @@ export async function generateTronChildAddress(mnemonic: string, index = 0) {
   const child = root.derivePath(path);
   const privateKey = child?.privateKey?.replace(/^0x/i, '');
 
-  const root12 = bip32.fromSeed(seed);
-  const child12 = root12.derivePath(path);
-  const privateKey12 = Buffer.from(child12?.privateKey || '').toString('hex');
-
   if (!privateKey) {
     throw new Error('❌ Failed to generate private key');
   }
 
   // 3. generate Tron address
-  const tronWeb = getTronWebInstance('nile');
+  const curChainConfig = useChainConfigStore.getState().curChainConfig;
+  const tronWeb = curChainConfig?.chain
+    ? getTronWebInstance(curChainConfig)
+    : getTronWebInstance('nile');
   const address = tronWeb.address.fromPrivateKey(privateKey) || '';
 
   return { address, privateKey, path };
@@ -99,7 +100,7 @@ export async function generateTronChildAddressFromStorage(index = 0) {
     }
 
     // get stored mnemonic
-    const mnemonic = getWalletMnemonic();
+    const mnemonic = await getWalletMnemonic();
     if (!mnemonic) {
       console.warn('Failed to get stored mnemonic');
       return null;
@@ -118,7 +119,11 @@ export async function generateTronChildAddressFromStorage(index = 0) {
  * @param count
  * @returns Promise<Array<{address: string, privateKey: string, path: string}>> return address array
  */
-export async function generateMultipleTronAddresses(startIndex = 0, count = 1) {
+export async function generateMultipleTronAddresses(
+  startIndex = 0,
+  count = 1,
+  onProgress?: (current: number, total: number) => void
+) {
   try {
     // use static import since circular dependency has been resolved
     const { getWalletMnemonic, hasWalletMnemonic } = useWalletStore.getState();
@@ -130,39 +135,23 @@ export async function generateMultipleTronAddresses(startIndex = 0, count = 1) {
     }
 
     // get stored mnemonic
-    const mnemonic = getWalletMnemonic();
+    const mnemonic = await getWalletMnemonic();
     if (!mnemonic) {
       console.warn('Failed to get stored mnemonic');
       return [];
     }
-    const seed = await bip39.mnemonicToSeed(mnemonic);
 
-    const root = HDNodeWallet.fromSeed(seed);
+    const curChainConfig = useChainConfigStore.getState().curChainConfig;
 
-    // 3. generate Tron address
-    const tronWeb = getTronWebInstance('nile');
-
-    // batch generate addresses
-    const addresses = [];
-    for (let i = 0; i < count; i++) {
-      const index = startIndex + i;
-      // 2. Tron BIP44 path (coin_type=195)
-      const path = `m/44'/195'/0'/0/${index}`;
-      const child = root.derivePath(path);
-      const privateKey = child?.privateKey?.replace(/^0x/i, '');
-
-      const root12 = bip32.fromSeed(seed);
-      const child12 = root12.derivePath(path);
-      const privateKey12 = Buffer.from(child12?.privateKey || '').toString('hex');
-
-      if (!privateKey) {
-        throw new Error('❌ Failed to generate private key');
-      }
-
-      const address = tronWeb.address.fromPrivateKey(privateKey) || '';
-      addresses.push({ address, privateKey, path });
-    }
-    return addresses;
+    return workerManager.generateAddresses(
+      mnemonic,
+      startIndex,
+      count,
+      50,
+      curChainConfig?.rpc_url || '',
+      onProgress,
+      undefined
+    );
   } catch (error) {
     console.error('Failed to batch generate addresses:', error);
     return [];

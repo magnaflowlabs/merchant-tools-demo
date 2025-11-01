@@ -1,4 +1,5 @@
 # MagnaFlow Merchant Tools
+
 A powerful blockchain merchant tool management platform designed specifically for cryptocurrency merchants, providing comprehensive wallet management, fund collection, and payment solutions.
 
 ## 🚀 Quick Start
@@ -6,25 +7,21 @@ A powerful blockchain merchant tool management platform designed specifically fo
 ### Requirements
 
 - Node.js 20+
-- npm or pnpm
+- npm
 
 ### Install Dependencies
 
-```bash
+````bash
 # Using npm
 npm install
 
-# Or using pnpm (recommended)
-pnpm install
-```
+
 
 ### Start Development Server
 
 ```bash
 npm run dev
-# or
-pnpm dev
-```
+````
 
 The application will start at `http://localhost:5173`
 
@@ -32,16 +29,12 @@ The application will start at `http://localhost:5173`
 
 ```bash
 npm run build
-# or
-pnpm build
 ```
 
 ### Code Linting
 
 ```bash
 npm run lint
-# or
-pnpm lint
 ```
 
 #### WebSocket Connection

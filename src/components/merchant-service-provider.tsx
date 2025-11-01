@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useAuthStore } from '@/stores';
+import { useAuthStore, useShallow } from '@/stores';
 import { useWebSocketService } from '@/services/ws';
 
 interface MerchantServiceProviderProps {
@@ -7,7 +7,12 @@ interface MerchantServiceProviderProps {
 }
 
 export function MerchantServiceProvider({ children }: MerchantServiceProviderProps) {
-  const { isAuthenticated, connUrl } = useAuthStore();
+  const { isAuthenticated, connUrl } = useAuthStore(
+    useShallow((state) => ({
+      isAuthenticated: state.isAuthenticated,
+      connUrl: state.connUrl,
+    }))
+  );
   const { ws, connectAsync } = useWebSocketService();
 
   useEffect(() => {

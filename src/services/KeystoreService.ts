@@ -29,8 +29,12 @@ interface KeystoreState {
 
 /**
  * download object as JSON file
+ * @returns true if file was saved successfully, false if user cancelled
  */
-async function downloadObjectAsJson(obj: Record<string, unknown>, filename: string) {
+async function downloadObjectAsJson(
+  obj: Record<string, unknown>,
+  filename: string
+): Promise<boolean> {
   const dataStr = JSON.stringify(obj, null, 2);
   const dataBlob = new Blob([dataStr], { type: 'application/json' });
 
@@ -55,7 +59,14 @@ async function downloadObjectAsJson(obj: Record<string, unknown>, filename: stri
     const writable = await handle.createWritable();
     await writable.write(dataStr);
     await writable.close();
+    return true;
   } catch (error) {
+    // Check if user actively cancelled operation
+    if (error instanceof Error && error.name === 'AbortError') {
+      return false;
+    }
+
+    // If browser doesn't support, fall back to traditional download method
     console.warn('showSaveFilePicker not supported, falling back to default download:', error);
     const url = URL.createObjectURL(dataBlob);
     const link = document.createElement('a');
@@ -65,6 +76,7 @@ async function downloadObjectAsJson(obj: Record<string, unknown>, filename: stri
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    return true;
   }
 }
 
@@ -72,12 +84,12 @@ async function downloadObjectAsJson(obj: Record<string, unknown>, filename: stri
  * create encrypted keystore JSON file
  * @param mnemonic
  * @param formData
- * @returns Promise<boolean> whether successfully created
+ * @returns Promise<{ success: boolean; error?: string; cancelled?: boolean }>
  */
 export async function createKeystore(
   mnemonic: string,
   formData: KeystoreFormData
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
   try {
     // validate input - use unified validation function
     const validationErrors = validateKeystoreForm(formData);
@@ -101,7 +113,12 @@ export async function createKeystore(
     keystoreObject.walletName = formData.walletName;
     keystoreObject.description = formData.description;
 
-    await downloadObjectAsJson(keystoreObject, `${formData.walletName}-keystore`);
+    const saved = await downloadObjectAsJson(keystoreObject, `${formData.walletName}-keystore`);
+
+    // If user cancelled save operation, return cancelled status
+    if (!saved) {
+      return { success: false, cancelled: true };
+    }
 
     return { success: true };
   } catch (error) {
@@ -132,7 +149,7 @@ export class KeystoreService {
 
   async createKeystoreWithState(
     formData: KeystoreFormData
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; cancelled?: boolean }> {
     if (!this.state.currentMnemonic) {
       return { success: false, error: 'Mnemonic phrase not found, please return and regenerate' };
     }

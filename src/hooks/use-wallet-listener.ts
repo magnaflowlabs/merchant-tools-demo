@@ -127,3 +127,32 @@ export function useWalletListener(options: UseWalletListenerOptions = {}): UseWa
     isListening: isListeningRef.current,
   };
 }
+
+export function useWalletConnection(
+  onConnect?: (address: string) => void,
+  onDisconnect?: () => void
+) {
+  return useWalletListener({
+    onConnect,
+    onDisconnect,
+  });
+}
+
+export function useWalletState() {
+  const [state, setState] = useState(() => walletListenerService.getCurrentState());
+
+  useEffect(() => {
+    const removeListener = walletListenerService.addListener(() => {
+      setState(walletListenerService.getCurrentState());
+    });
+
+    walletListenerService.startListening();
+
+    return () => {
+      removeListener();
+      walletListenerService.stopListening();
+    };
+  }, []);
+
+  return state;
+}

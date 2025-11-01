@@ -24,6 +24,7 @@ interface WalletState {
   walletPassword: string | null;
   tempMnemonic: string | null;
   keystore_id: string | null;
+  // actions
   setWalletImported: ({
     imported,
     name,
@@ -35,8 +36,9 @@ interface WalletState {
   setTempMnemonic: (mnemonic: string | null) => void;
   clearWallet: () => void;
   clearTempMnemonic: () => void;
-  storeWalletMnemonic: (mnemonic: string) => void;
-  getWalletMnemonic: () => string | null;
+  // mnemonic management
+  storeWalletMnemonic: (mnemonic: string) => Promise<void>;
+  getWalletMnemonic: () => Promise<string | null>;
   hasWalletMnemonic: () => boolean;
 }
 
@@ -51,6 +53,7 @@ export const useWalletStore = create<WalletState>()(
       tempMnemonic: null,
       keystore_id: null,
 
+      // set wallet imported status
       setWalletImported: ({ imported, name, address, keystoreData, password, keystore_id }) =>
         set({
           isWalletImported: imported,
@@ -61,10 +64,13 @@ export const useWalletStore = create<WalletState>()(
           keystore_id: keystore_id || null,
         }),
 
+      // set temporary mnemonic (for wallet creation process)
       setTempMnemonic: (mnemonic) => set({ tempMnemonic: mnemonic }),
 
+      // clear wallet state
       clearWallet: () => {
         const state = get();
+        // when clearing wallet, also delete stored mnemonic
         if (state.keystore_id) {
           removeMnemonic(state.keystore_id);
         }
@@ -78,25 +84,46 @@ export const useWalletStore = create<WalletState>()(
         });
       },
 
+      // clear temporary mnemonic
       clearTempMnemonic: () => set({ tempMnemonic: null }),
 
-      storeWalletMnemonic: (mnemonic: string) => {
+      // store wallet mnemonic
+      storeWalletMnemonic: async (mnemonic: string) => {
         const state = get();
         if (state.keystore_id) {
-          storeMnemonic(mnemonic, state.keystore_id);
+          try {
+            await storeMnemonic(mnemonic, state.keystore_id);
+          } catch (error) {
+            if (import.meta.env.DEV) {
+              console.warn('Cannot store mnemonic:', error);
+            }
+            throw error;
+          }
         } else {
-          console.warn('Cannot store mnemonic: keystore_id does not exist');
+          if (import.meta.env.DEV) {
+            console.warn('Cannot store mnemonic: keystore_id does not exist');
+          }
+          throw new Error('Keystore ID not found');
         }
       },
 
-      getWalletMnemonic: () => {
+      // get wallet mnemonic
+      getWalletMnemonic: async () => {
         const state = get();
         if (state.keystore_id) {
-          return getMnemonic(state.keystore_id);
+          try {
+            return await getMnemonic(state.keystore_id);
+          } catch (error) {
+            if (import.meta.env.DEV) {
+              console.error('Failed to get mnemonic:', error);
+            }
+            return null;
+          }
         }
         return null;
       },
 
+      // check if mnemonic is stored
       hasWalletMnemonic: () => {
         const state = get();
         if (state.keystore_id) {
@@ -111,8 +138,9 @@ export const useWalletStore = create<WalletState>()(
         isWalletImported: state.isWalletImported,
         walletName: state.walletName,
         walletAddress: state.walletAddress,
-        keystoreData: state.keystoreData,
-        walletPassword: state.walletPassword,
+        // Do NOT persist raw keystore data and password for security
+        // keystoreData: state.keystoreData,
+        // walletPassword: state.walletPassword,
         tempMnemonic: state.tempMnemonic,
         keystore_id: state.keystore_id,
       }),

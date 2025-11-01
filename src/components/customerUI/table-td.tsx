@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils';
 
 export interface CustomerTDProps extends React.TdHTMLAttributes<HTMLTableCellElement> {}
 
-export const CurstomerTD: React.FC<CustomerTDProps> = ({ className, style, children, ...rest }) => {
+export function CurstomerTD({ className, style, children, ...rest }: CustomerTDProps) {
   const baseClasses = 'px-4 py-3 text-left text-sm ';
 
   return (
@@ -11,6 +11,6 @@ export const CurstomerTD: React.FC<CustomerTDProps> = ({ className, style, child
       {children}
     </td>
   );
-};
+}
 
 export default CurstomerTD;

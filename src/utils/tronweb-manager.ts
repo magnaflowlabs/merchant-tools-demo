@@ -1,40 +1,58 @@
 import { TronWeb } from 'tronweb';
 import { TRONWEB_CONFIG } from '../config/constants';
+import type { ChainConfig } from '@/types/merchant';
 
-// TronWeb instance cache
 const tronWebInstances = new Map<string, TronWeb>();
 
-// instance usage time record
 const instanceUsageTime = new Map<string, number>();
 
-/**
- * get global TronWeb instance
- * @param network network type ('mainnet' | 'nile')
- * @returns TronWeb instance
- */
-export function getTronWebInstance(network: string = TRONWEB_CONFIG.DEFAULT_NETWORK): TronWeb {
+export function getChainConfigByName(
+  chainConfigs: ChainConfig[],
+  chainName: string
+): ChainConfig | undefined {
+  return chainConfigs.find((config) => config.chain === chainName);
+}
+
+export function getTronWebInstance(networkOrConfig?: string | ChainConfig): TronWeb {
+  let cacheKey: string;
+  let fullHost: string;
+  let headers: Record<string, string> | undefined;
+
+  // handle ChainConfig object
+  if (typeof networkOrConfig === 'object' && networkOrConfig !== null) {
+    const chainConfig = networkOrConfig as ChainConfig;
+    cacheKey = chainConfig.chain;
+    fullHost = chainConfig.rpc_url;
+    headers = undefined; // ChainConfig doesn't include headers, use default
+  } else {
+    // handle string network parameter (backward compatibility)
+    const network = networkOrConfig || TRONWEB_CONFIG.DEFAULT_NETWORK;
+    cacheKey = network;
+    const networkConfig = TRONWEB_CONFIG.NETWORKS[network as keyof typeof TRONWEB_CONFIG.NETWORKS];
+    if (!networkConfig) {
+      throw new Error(`unsupported network type: ${network}`);
+    }
+    fullHost = networkConfig.fullHost;
+    headers = networkConfig.headers;
+  }
+
   // check if instance is already cached
-  if (tronWebInstances.has(network)) {
-    const instance = tronWebInstances.get(network)!;
-    instanceUsageTime.set(network, Date.now());
+  if (tronWebInstances.has(cacheKey)) {
+    const instance = tronWebInstances.get(cacheKey)!;
+    instanceUsageTime.set(cacheKey, Date.now());
     return instance;
   }
 
   // create new instance
-  const networkConfig = TRONWEB_CONFIG.NETWORKS[network as keyof typeof TRONWEB_CONFIG.NETWORKS];
-  if (!networkConfig) {
-    throw new Error(`unsupported network type: ${network}`);
-  }
-
   const tronWeb = new TronWeb({
-    fullHost: networkConfig.fullHost,
-    headers: networkConfig.headers,
+    fullHost,
+    headers,
   });
 
   // cache instance
   if (TRONWEB_CONFIG.CACHE.ENABLED) {
-    tronWebInstances.set(network, tronWeb);
-    instanceUsageTime.set(network, Date.now());
+    tronWebInstances.set(cacheKey, tronWeb);
+    instanceUsageTime.set(cacheKey, Date.now());
 
     // if cache instance is too many, clean the oldest instance
     if (tronWebInstances.size > TRONWEB_CONFIG.CACHE.MAX_INSTANCES) {
@@ -43,6 +61,31 @@ export function getTronWebInstance(network: string = TRONWEB_CONFIG.DEFAULT_NETW
   }
 
   return tronWeb;
+}
+
+/**
+ * Always create a brand-new TronWeb instance without using cache.
+ * Useful when callers need strict instance isolation (e.g., avoid state bleed).
+ */
+export function createTronWebInstance(networkOrConfig?: string | ChainConfig): TronWeb {
+  let fullHost: string;
+  let headers: Record<string, string> | undefined;
+
+  if (typeof networkOrConfig === 'object' && networkOrConfig !== null) {
+    const chainConfig = networkOrConfig as ChainConfig;
+    fullHost = chainConfig.rpc_url;
+    headers = undefined;
+  } else {
+    const network = networkOrConfig || TRONWEB_CONFIG.DEFAULT_NETWORK;
+    const networkConfig = TRONWEB_CONFIG.NETWORKS[network as keyof typeof TRONWEB_CONFIG.NETWORKS];
+    if (!networkConfig) {
+      throw new Error(`unsupported network type: ${network}`);
+    }
+    fullHost = networkConfig.fullHost;
+    headers = networkConfig.headers;
+  }
+
+  return new TronWeb({ fullHost, headers });
 }
 
 /**
@@ -111,15 +154,10 @@ if (typeof window !== 'undefined') {
 // export default instance get function
 export default getTronWebInstance;
 
-/**
- * initialize global TronWeb instance (call after wallet import success)
- * @param network default is 'nile'
- * @returns TronWeb instance
- */
-export function initializeGlobalTronWeb(network: string = 'nile'): TronWeb {
+export function initializeGlobalTronWeb(networkOrConfig?: string | ChainConfig): TronWeb {
   try {
     // get and cache TronWeb instance
-    const tronWeb = getTronWebInstance(network);
+    const tronWeb = getTronWebInstance(networkOrConfig || 'nile');
 
     return tronWeb;
   } catch (error) {
@@ -128,11 +166,12 @@ export function initializeGlobalTronWeb(network: string = 'nile'): TronWeb {
   }
 }
 
-/**
- * check if global TronWeb instance is initialized
- * @param network network type
- * @returns boolean
- */
-export function isGlobalTronWebInitialized(network: string = 'nile'): boolean {
-  return hasCachedInstance(network);
+export function isGlobalTronWebInitialized(networkOrConfig?: string | ChainConfig): boolean {
+  let cacheKey: string;
+  if (typeof networkOrConfig === 'object' && networkOrConfig !== null) {
+    cacheKey = (networkOrConfig as ChainConfig).chain;
+  } else {
+    cacheKey = networkOrConfig || 'nile';
+  }
+  return hasCachedInstance(cacheKey);
 }

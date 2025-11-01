@@ -1,59 +1,72 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CollectionHistoryTable } from './collection-history-table';
-import { useMerchantStore } from '@/stores';
-import { useAuthStore } from '@/stores/auth-store';
+import { useMerchantStore, useShallow } from '@/stores';
 import { Button } from '@/components/ui/button';
 import { IconRefresh } from '@tabler/icons-react';
 import { Pagination } from '@/components/customerUI/pagination';
-import { multiChainConfig } from '@/config/constants';
+import { useChainConfigStore } from '@/stores/chain-config-store';
 
-interface CollectionHistoryProps {
-  title?: string;
-  description?: string;
-  initialPageNumber?: number;
-  initialPageSize?: number;
-}
+export function CollectionHistory() {
+  const { queryCollectionHistory, collectionHistory } = useMerchantStore(
+    useShallow((state) => ({
+      queryCollectionHistory: state.queryCollectionHistory,
+      collectionHistory: state.collectionHistory,
+    }))
+  );
 
-export function CollectionHistory({
-  title = 'Recent 24 hours have been aggregated into history.',
-  initialPageNumber = 1,
-  initialPageSize = 10,
-}: CollectionHistoryProps) {
-  const { error, queryCollectionHistory, collectionHistory } = useMerchantStore();
-  const { cur_chain } = useAuthStore();
+  // Get current chain from chain config store
+  const curChainConfig = useChainConfigStore((state) => state.curChainConfig);
 
   // Use a unified loading state
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [currentPage, setCurrentPage] = useState(initialPageNumber);
-  const [currentPageSize, setCurrentPageSize] = useState(initialPageSize);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPageSize, setCurrentPageSize] = useState(10);
 
-  // Use useCallback to optimize functions
-  const loadData = useCallback(async () => {
+  useEffect(() => {
+    if (!curChainConfig.chain) {
+      return;
+    }
+
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    queryCollectionHistory({
+      page_number: currentPage,
+      page_size: currentPageSize,
+      sort_order: 'desc',
+      filters: {
+        chain: curChainConfig.chain,
+        status: 'completed',
+        start_time: twentyFourHoursAgo.toISOString(),
+        end_time: now.toISOString(),
+      },
+    });
+  }, [currentPage, currentPageSize, curChainConfig.chain]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
+      const now = new Date();
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
       await queryCollectionHistory({
         page_number: currentPage,
         page_size: currentPageSize,
+        sort_order: 'desc',
         filters: {
-          chain: cur_chain.chain,
+          chain: curChainConfig.chain,
           status: 'completed',
+          start_time: twentyFourHoursAgo.toISOString(),
+          end_time: now.toISOString(),
         },
       });
     } catch (error) {
-      console.error('Failed to load collection history:', error);
-    }
-  }, [queryCollectionHistory, currentPage, currentPageSize, cur_chain.chain]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    loadData().finally(() => {
+      console.error('Failed to refresh collection history:', error);
+    } finally {
       setIsRefreshing(false);
-    });
-  }, [loadData]);
+    }
+  };
 
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
@@ -61,15 +74,13 @@ export function CollectionHistory({
 
   const handlePageSizeChange = useCallback((pageSize: number) => {
     setCurrentPageSize(pageSize);
-    setCurrentPage(1); // Reset to first page
+    setCurrentPage(1);
   }, []);
 
   return (
     <Card>
       <CardHeader className="flex justify-between items-center px-6">
-        <div>
-          <CardTitle>{title}</CardTitle>
-        </div>
+        <CardTitle>24-hour history</CardTitle>
         <Button
           className="flex items-center gap-2"
           onClick={handleRefresh}
@@ -77,26 +88,23 @@ export function CollectionHistory({
           size="sm"
         >
           <IconRefresh className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh'}
+          Refresh
         </Button>
       </CardHeader>
       <CardContent className="px-4 md:px-6">
         <CollectionHistoryTable
           historyData={collectionHistory?.list || []}
-          scanUrl={
-            multiChainConfig.find((config) => config.chain === collectionHistory?.chain)
-              ?.scan_url || ''
-          }
+          isRefreshing={isRefreshing}
         />
-        {collectionHistory?.total_records && (
+
+        {Boolean(collectionHistory?.total_records) && (
           <div className="mt-4">
             <Pagination
               currentPage={currentPage}
-              totalItems={collectionHistory.total_records}
+              totalItems={collectionHistory?.total_records ?? 0}
               pageSize={currentPageSize}
-              selectedPageSize={currentPageSize.toString()}
               onPageChange={handlePageChange}
-              onPageSizeChange={(value: string) => handlePageSizeChange(Number(value))}
+              onPageSizeChange={handlePageSizeChange}
             />
           </div>
         )}

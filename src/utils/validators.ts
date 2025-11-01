@@ -14,6 +14,43 @@ export interface ValidationError {
 }
 
 /**
+ * Input validation constants
+ */
+const VALIDATION_LIMITS = {
+  WALLET_NAME_MIN: 2,
+  WALLET_NAME_MAX: 50,
+  DESCRIPTION_MIN: 3,
+  DESCRIPTION_MAX: 200,
+  PASSWORD_MIN: 8,
+  PASSWORD_MAX: 50,
+} as const;
+
+/**
+ * Allowed character patterns
+ */
+const CHARACTER_PATTERNS = {
+  // Alphanumeric, underscore, hyphen (no spaces, dots, or special chars)
+  WALLET_NAME: /^[a-zA-Z0-9_-]+$/,
+  // Alphanumeric and common safe characters for description
+  DESCRIPTION: /^[a-zA-Z0-9_\s-]+$/,
+} as const;
+
+/**
+ * Sanitize string input - remove control characters and trim
+ */
+function sanitizeInput(input: string): string {
+  // Remove control characters (except common whitespace)
+  return input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+}
+
+/**
+ * Validate string length
+ */
+function validateLength(value: string, min: number, max: number): boolean {
+  return value.length >= min && value.length <= max;
+}
+
+/**
  * validate Keystore form data
  * @param formData form data
  * @returns validation error array, empty array means validation passed
@@ -22,30 +59,71 @@ export function validateKeystoreForm(formData: KeystoreFormData): ValidationErro
   const errors: ValidationError[] = [];
 
   // validate wallet name
-  if (!formData.walletName.trim()) {
+  const sanitizedWalletName = sanitizeInput(formData.walletName);
+  if (!sanitizedWalletName) {
     errors.push({ field: 'walletName', message: 'please input wallet name' });
-  } else if (formData.walletName.trim().length < 2) {
-    errors.push({ field: 'walletName', message: 'wallet name must be at least 2 characters' });
-  } else if (formData.walletName.includes(' ') || formData.walletName.includes('.')) {
-    errors.push({ field: 'walletName', message: 'wallet name cannot contain spaces or dots' });
+  } else if (
+    !validateLength(
+      sanitizedWalletName,
+      VALIDATION_LIMITS.WALLET_NAME_MIN,
+      VALIDATION_LIMITS.WALLET_NAME_MAX
+    )
+  ) {
+    errors.push({
+      field: 'walletName',
+      message: `wallet name must be between ${VALIDATION_LIMITS.WALLET_NAME_MIN} and ${VALIDATION_LIMITS.WALLET_NAME_MAX} characters`,
+    });
+  } else if (!CHARACTER_PATTERNS.WALLET_NAME.test(sanitizedWalletName)) {
+    errors.push({
+      field: 'walletName',
+      message: 'wallet name can only contain letters, numbers, underscores, and hyphens',
+    });
   }
 
   // validate description/user token (optional field)
   if (formData.description !== undefined) {
-    if (!formData.description.trim()) {
+    const sanitizedDescription = sanitizeInput(formData.description);
+    if (!sanitizedDescription) {
       errors.push({ field: 'description', message: 'please input user token' });
-    } else if (formData.description.trim().length < 3) {
-      errors.push({ field: 'description', message: 'user token must be at least 3 characters' });
+    } else if (
+      !validateLength(
+        sanitizedDescription,
+        VALIDATION_LIMITS.DESCRIPTION_MIN,
+        VALIDATION_LIMITS.DESCRIPTION_MAX
+      )
+    ) {
+      errors.push({
+        field: 'description',
+        message: `user token must be between ${VALIDATION_LIMITS.DESCRIPTION_MIN} and ${VALIDATION_LIMITS.DESCRIPTION_MAX} characters`,
+      });
+    } else if (!CHARACTER_PATTERNS.DESCRIPTION.test(sanitizedDescription)) {
+      errors.push({
+        field: 'description',
+        message: 'user token contains invalid characters',
+      });
     }
   }
 
   // validate password
-  if (!formData.password) {
+  const sanitizedPassword = sanitizeInput(formData.password);
+  if (!sanitizedPassword) {
     errors.push({ field: 'password', message: 'please input password' });
-  } else if (formData.password.length < 8) {
-    errors.push({ field: 'password', message: 'password length must be at least 8 characters' });
-  } else if (formData.password.length > 50) {
-    errors.push({ field: 'password', message: 'password length cannot exceed 50 characters' });
+  } else if (
+    !validateLength(
+      sanitizedPassword,
+      VALIDATION_LIMITS.PASSWORD_MIN,
+      VALIDATION_LIMITS.PASSWORD_MAX
+    )
+  ) {
+    errors.push({
+      field: 'password',
+      message: `password must be between ${VALIDATION_LIMITS.PASSWORD_MIN} and ${VALIDATION_LIMITS.PASSWORD_MAX} characters`,
+    });
+  } else if (sanitizedPassword.includes(' ') && sanitizedPassword.trim() !== sanitizedPassword) {
+    errors.push({
+      field: 'password',
+      message: 'password cannot start or end with spaces',
+    });
   }
 
   // validate confirm password

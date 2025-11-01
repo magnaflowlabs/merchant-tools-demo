@@ -8,7 +8,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useAuthStore, useWalletStore, useSyncConfigStore, useMerchantStore } from '@/stores';
+import {
+  useAuthStore,
+  useWalletStore,
+  useSyncConfigStore,
+  useMerchantStore,
+  useShallow,
+} from '@/stores';
 
 import { ImportWalletModal } from '@/components/import-wallet-modal';
 import { toast } from 'sonner';
@@ -16,13 +22,20 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { IconHelp } from '@tabler/icons-react';
 import { getMnemonicFromKeystore, generateTronChildAddress } from '@/utils/bip32-utils';
 import { initializeGlobalTronWeb } from '@/utils/tronweb-manager';
+import { useChainConfigStore } from '@/stores/chain-config-store';
+import { logger } from '@/utils/logger';
 
 interface KeystoreWalletButtonProps {
   className?: string;
 }
 
 export function KeystoreWalletButton({ className }: KeystoreWalletButtonProps) {
-  const { isAdmin, user } = useAuthStore();
+  const { isAdmin, profileData } = useAuthStore(
+    useShallow((state) => ({
+      isAdmin: state.isAdmin,
+      profileData: state.profileData,
+    }))
+  );
   const {
     isWalletImported,
     walletName,
@@ -30,22 +43,42 @@ export function KeystoreWalletButton({ className }: KeystoreWalletButtonProps) {
     clearWallet,
     keystore_id,
     storeWalletMnemonic,
-  } = useWalletStore();
-  const { setIsSyncingAddress } = useSyncConfigStore();
-  const { cancelCollecting } = useMerchantStore();
+  } = useWalletStore(
+    useShallow((state) => ({
+      isWalletImported: state.isWalletImported,
+      walletName: state.walletName,
+      setWalletImported: state.setWalletImported,
+      clearWallet: state.clearWallet,
+      keystore_id: state.keystore_id,
+      storeWalletMnemonic: state.storeWalletMnemonic,
+    }))
+  );
+  const { setIsSyncingAddress } = useSyncConfigStore(
+    useShallow((state) => ({
+      setIsSyncingAddress: state.setIsSyncingAddress,
+    }))
+  );
+  const { cancelCollecting } = useMerchantStore(
+    useShallow((state) => ({
+      cancelCollecting: state.cancelCollecting,
+    }))
+  );
 
   const navigate = useNavigate();
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const curChainConfig = useChainConfigStore((state) => state.curChainConfig);
   const isValidKeystore = useMemo(() => {
-    return !!(user?.keystore_id === keystore_id || !user?.keystore_id);
-  }, [user?.keystore_id, keystore_id]);
+    return !!(profileData?.keystore_id === keystore_id || !profileData?.keystore_id);
+  }, [profileData, keystore_id]);
 
+  // remove wallet
   const handleRemoveWallet = () => {
     clearWallet();
     cancelCollecting();
     setIsSyncingAddress(false);
   };
 
+  // import keystore file
   const handleImportWallet = async (
     _file: File,
     walletName: string,
@@ -54,11 +87,19 @@ export function KeystoreWalletButton({ className }: KeystoreWalletButtonProps) {
   ) => {
     try {
       const jsonData = JSON.parse(keystoreData);
+
+      // 1. get mnemonic from keystore
       const mnemonic = await getMnemonicFromKeystore(keystoreData, password);
+
+      // 2. generate child address 0
       const resp = await generateTronChildAddress(mnemonic, 0);
+      //hd wallet child address 0
       const { address: zeroChildAddress } = resp;
+
+      // print parsed JSON data
       const { address } = jsonData;
 
+      // update wallet state, including keystore data and password
       setWalletImported({
         imported: true,
         name: walletName,
@@ -68,39 +109,53 @@ export function KeystoreWalletButton({ className }: KeystoreWalletButtonProps) {
         keystore_id: zeroChildAddress,
       });
 
-      storeWalletMnemonic(mnemonic);
+      // 3. safely store mnemonic (ensure keystore_id is set after setting wallet state)
+      await storeWalletMnemonic(mnemonic);
 
+      // initialize global TronWeb instance based on current chain config
       try {
-        initializeGlobalTronWeb('nile');
+        if (curChainConfig) {
+          initializeGlobalTronWeb(curChainConfig);
+        } else {
+          initializeGlobalTronWeb();
+        }
       } catch (error) {
-        console.error('initialize global TronWeb instance failed:', error);
+        logger.error('initialize global TronWeb instance failed', error);
       }
 
       toast.success(`Keystore imported success: ${walletName}`);
+
+      // you can add the logic to redirect to the wallet management page here
     } catch (error) {
-      console.error('error when handling keystore file:', error);
+      logger.error('error when handling keystore file', error);
       toast.error('Invalid keystore file format');
     }
   };
 
+  // create wallet
   const handleCreateWallet = () => {
     setIsImportModalOpen(false);
+    // redirect to create wallet page
     navigate('/dashboard?view=create-wallet');
   };
 
+  // handle wallet button click
   const handleWalletButtonClick = () => {
     if (!isWalletImported) {
       setIsImportModalOpen(true);
     }
   };
 
+  // only admin can see this component
   if (!isAdmin) {
     return null;
   }
 
   return (
     <>
+      {/* <div className="h-4 w-px bg-border" /> */}
       {isWalletImported && walletName ? (
+        // show dropdown menu when wallet is imported
         <div className="flex items-center">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -151,7 +206,7 @@ export function KeystoreWalletButton({ className }: KeystoreWalletButtonProps) {
           onClick={handleWalletButtonClick}
         >
           <IconWallet className="h-4 w-4" />
-          <span className="text-sm">Import Keystore File</span>
+          <span className="text-sm">Import Keystore</span>
         </Button>
       )}
 

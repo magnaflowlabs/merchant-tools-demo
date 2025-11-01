@@ -15,7 +15,6 @@ interface AppState {
   }>;
 
   globalLoading: boolean;
-  selectedChain: string;
 
   setTheme: (theme: 'light' | 'dark' | 'system') => void;
   toggleSidebar: () => void;
@@ -24,7 +23,6 @@ interface AppState {
   removeNotification: (id: string) => void;
   clearNotifications: () => void;
   setGlobalLoading: (loading: boolean) => void;
-  setCurChain: (chain: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -34,7 +32,6 @@ export const useAppStore = create<AppState>()(
       sidebarOpen: true,
       notifications: [],
       globalLoading: false,
-      selectedChain: '',
 
       setTheme: (theme) => set({ theme }),
 
@@ -63,15 +60,12 @@ export const useAppStore = create<AppState>()(
       clearNotifications: () => set({ notifications: [] }),
 
       setGlobalLoading: (loading) => set({ globalLoading: loading }),
-
-      setCurChain: (chain) => set({ selectedChain: chain }),
     }),
     {
       name: 'app-storage',
       partialize: (state) => ({
         theme: state.theme,
         sidebarOpen: state.sidebarOpen,
-        selectedChain: state.selectedChain,
       }),
     }
   )

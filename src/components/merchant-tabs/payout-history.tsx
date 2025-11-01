@@ -3,101 +3,90 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PayoutHistoryTable } from './payout-history-table';
 import { Button } from '@/components/ui/button';
 import { IconRefresh } from '@tabler/icons-react';
-import { useAuthStore } from '@/stores';
 import { Pagination } from '@/components/customerUI';
 import { queryPayoutHistory } from '@/services/ws/api';
 import type { PayoutHistoryResponse } from '@/services/ws/type';
-import { multiChainConfig } from '@/config/constants';
-interface PayoutHistoryProps {
-  title?: string;
-  description?: string;
-  initialPageNumber?: number;
-  initialPageSize?: number;
-}
+import { useOrderStore } from '@/stores/order-store';
+import { useChainConfigStore } from '@/stores/chain-config-store';
 
-export function PayoutHistory({
-  title = 'Recent 24 hours have been aggregated into payout history.',
-  initialPageNumber = 1,
-  initialPageSize = 10,
-}: PayoutHistoryProps) {
-  const { cur_chain } = useAuthStore();
-
+export function PayoutHistory() {
+  // Get current chain from chain config store
+  const curChainConfig = useChainConfigStore((state) => state.curChainConfig);
+  const hasCompletedOrders = useOrderStore((state) => state.hasCompletedOrders);
+  const setHasCompletedOrders = useOrderStore((state) => state.setHasCompletedOrders);
   const [data, setData] = useState<PayoutHistoryResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [currentPage, setCurrentPage] = useState(initialPageNumber);
-  const [currentPageSize, setCurrentPageSize] = useState(initialPageSize);
-
-  const loadData = useCallback(async () => {
+  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPageSize, setCurrentPageSize] = useState(10);
+  const getPayoutHistory = useCallback(async () => {
     setLoading(true);
     try {
+      const now = new Date();
+      const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       const response = await queryPayoutHistory({
         page_number: currentPage,
         page_size: currentPageSize,
+        sort_order: 'desc',
         filters: {
-          chain: cur_chain.chain,
+          chain: curChainConfig.chain,
           status: 'completed',
+          start_time: twentyFourHoursAgo.toISOString(),
+          end_time: now.toISOString(),
         },
       });
 
       setData(response.data || null);
+      setHasCompletedOrders(false);
     } catch (error) {
       console.error('Failed to load payout history:', error);
     } finally {
       setLoading(false);
     }
-  }, [currentPage, currentPageSize, cur_chain.chain]);
+  }, [currentPage, currentPageSize, curChainConfig.chain]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleRefresh = useCallback(() => {
-    loadData();
-  }, [loadData]);
+    getPayoutHistory();
+  }, [getPayoutHistory]);
+  useEffect(() => {
+    if (hasCompletedOrders) {
+      getPayoutHistory();
+    }
+  }, [hasCompletedOrders]);
 
   const handlePageChange = useCallback((page: number) => {
     setCurrentPage(page);
   }, []);
 
-  const handlePageSizeChange = useCallback((pageSize: number) => {
+  const handlePageSizeChange = (pageSize: number) => {
     setCurrentPageSize(pageSize);
     setCurrentPage(1);
-  }, []);
+  };
 
-  // Calculate pagination data for customerUI Pagination component
-  // removed unused memoized paginationData
   return (
     <Card>
       <CardHeader className="flex justify-between items-center px-6">
-        <div>
-          <CardTitle>{title}</CardTitle>
-        </div>
+        <CardTitle>24-hour history</CardTitle>
         <Button
           className="flex items-center gap-2"
-          onClick={handleRefresh}
+          onClick={getPayoutHistory}
           variant="outline"
           size="sm"
           disabled={loading}
         >
           <IconRefresh className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          {loading ? 'Refreshing...' : 'Refresh'}
+          Refresh
         </Button>
       </CardHeader>
       <CardContent className="px-4 md:px-6">
-        <PayoutHistoryTable
-          payoutHistory={data}
-          isLoading={loading}
-          scanUrl={multiChainConfig.find((config) => config.chain === data?.chain)?.scan_url || ''}
-        />
-        {data?.total_records && (
+        <PayoutHistoryTable payoutHistory={data} isLoading={loading} />
+        {Boolean(data?.total_records) && (
           <div className="mt-4">
             <Pagination
               currentPage={currentPage}
-              totalItems={data.total_records}
+              totalItems={data?.total_records || 0}
               pageSize={currentPageSize}
-              selectedPageSize={currentPageSize.toString()}
               onPageChange={handlePageChange}
-              onPageSizeChange={(value: string) => handlePageSizeChange(Number(value))}
+              onPageSizeChange={handlePageSizeChange}
             />
           </div>
         )}

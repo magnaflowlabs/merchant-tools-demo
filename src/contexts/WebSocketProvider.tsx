@@ -1,15 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { logger } from '@/utils/logger';
 import { useAtom } from 'jotai';
 import { useNavigate } from 'react-router-dom';
 import { wsStoreAtom } from '@/stores/ws-store';
-import { useChainConfigStore, useAppStore } from '@/stores';
-import {
-  NextAction,
-  useAuthBindMutation,
-  useWebSocketService,
-  adminGetChainConfigs,
-} from '@/services/ws';
-import { useAuthStore } from '@/stores/auth-store';
+import { useAuthStore } from '@/stores';
+import { NextAction, useAuthBindMutation, useWebSocketService } from '@/services/ws';
+import { useChainConfigLoader } from '@/hooks/use-chain-config-loader';
 
 interface WebSocketContextType {
   connectionStatus: 'connecting' | 'connected' | 'disconnected';
@@ -25,18 +21,17 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
   const { ws, connectAsync, connect } = useWebSocketService();
   const { mutateAsync: authBind } = useAuthBindMutation();
   const navigate = useNavigate();
-  const { setChainConfigs, setLoading, setError } = useChainConfigStore();
-  const { setCurChain } = useAppStore();
+  const { loadChainConfigs } = useChainConfigLoader();
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'disconnected'
   >('disconnected');
-  const { user, setUser, setIsAdmin, logout } = useAuthStore();
+  const { setUser, setIsAdmin, logout } = useAuthStore();
 
   // Listen for connection events to update state
   useEffect(() => {
     if (!ws) return;
 
-    const onConnectWatch = (ev: CustomEvent) => {
+    const onConnectWatch = () => {
       setConnectionStatus('connected');
 
       if (wsConfig.token) {
@@ -54,45 +49,28 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
               setIsAdmin(user_info.role === 'admin');
             } else {
             }
-            try {
-              setLoading(true);
-              setError(null);
-              const result = await adminGetChainConfigs();
-              if (result.success && result.data) {
-                setChainConfigs(result.data.chain_configs);
-                if (result.data.chain_configs.length > 0) {
-                  setCurChain(result.data.chain_configs[0].chain);
-                }
-              } else {
-                setError(result.error || 'Failed to load chain configurations');
-              }
-              setLoading(false);
 
-              // Navigate to dashboard after chain configs fetch (success or failure)
-              navigate('/dashboard');
-            } catch (error) {
-              console.error('Failed to get chain configs:', error);
-              setError('Failed to load chain configurations');
-              setLoading(false);
-              navigate('/dashboard');
-            }
+            await loadChainConfigs();
+
+            // Navigate to dashboard after chain configs fetch (success or failure)
+            navigate('/dashboard');
           })
           .catch((error) => {
-            console.error('Auth bind failed:', error);
+            logger.error('Auth bind failed', error);
           });
       }
     };
 
-    const onDisconnectWatch = (ev: CustomEvent) => {
+    const onDisconnectWatch = () => {
       setConnectionStatus('disconnected');
     };
 
-    const onErrorWatch = (ev: CustomEvent) => {
+    const onErrorWatch = () => {
       setConnectionStatus('disconnected');
     };
 
-    const onMaxReconnectReachedWatch = (ev: CustomEvent) => {
-      console.error('Max reconnection attempts reached, logging out user');
+    const onMaxReconnectReachedWatch = () => {
+      logger.warn('Max reconnection attempts reached, logging out user');
       setConnectionStatus('disconnected');
       // Clear auth state and redirect to login
       logout();
@@ -105,18 +83,18 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
       if (res.code === 401) {
         const nextAction = res?.data?.next_action;
         if (nextAction === NextAction.PASSWORD_REQUIRED) {
-          console.warn('Password required');
+          logger.warn('Password required');
           navigate('/login');
           return;
         }
 
         if (nextAction === NextAction.PASSKEY_REQUIRED) {
-          console.warn('Passkey required');
+          logger.warn('Passkey required');
           navigate('/passkey');
           return;
         }
 
-        console.warn('Authentication required');
+        logger.warn('Authentication required');
         setWsConfig({ ...wsConfig, token: '' });
         ws.disconnect();
       }
@@ -158,12 +136,11 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
     wsConfig.token,
     authBind,
     navigate,
-    setChainConfigs,
-    setLoading,
-    setError,
-    setCurChain,
+    loadChainConfigs,
     logout,
     setWsConfig,
+    setUser,
+    setIsAdmin,
   ]);
 
   useEffect(() => {
@@ -174,12 +151,32 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
       try {
         await connectAsync(wsConfig.wsUrl);
       } catch (error: any) {
-        console.error('Failed to connect:', error);
+        logger.error('Failed to connect', error);
         setConnectionStatus('disconnected');
       }
     };
     connectWebSocket();
   }, [wsConfig.wsUrl, ws]);
+
+  // Listen to browser online/offline and retry connect when back online
+  useEffect(() => {
+    const handleOnline = () => {
+      if (!ws.isConnected() && wsConfig.wsUrl) {
+        setConnectionStatus('connecting');
+        connectAsync(wsConfig.wsUrl).catch(() => setConnectionStatus('disconnected'));
+      }
+    };
+    const handleOffline = () => {
+      setConnectionStatus('disconnected');
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [ws, wsConfig.wsUrl, connectAsync]);
 
   return (
     <WebSocketContext.Provider

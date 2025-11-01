@@ -3,6 +3,7 @@
  * Handles WebSocket push message business logic
  */
 
+import { PayoutOrderStatus } from '@/stores/order-store';
 import type {
   PushMessage,
   PushMessageHandlers,
@@ -19,9 +20,86 @@ import { useMerchantStore } from '@/stores/merchant-store';
 import { useSyncConfigStore } from '@/stores/sync-config-store';
 import { useOrderStore } from '@/stores/order-store';
 import { usePayinOrderStatusStore } from '@/stores/payin-order-status-store';
+import { useChainConfigStore } from '@/stores/chain-config-store';
 import { wsService } from '@/services/ws';
-import type { PayinOrder } from '@/types/merchant';
+import type { PayinOrder, PayoutOrder } from '@/types/merchant';
 import { PayinOrderStatus } from '@/types/merchant';
+/**
+ * Order batch processing manager
+ * Merge consecutive pushes into one update to reduce render count
+ */
+class OrderBatcher {
+  private payoutOrdersBatch: PayoutOrder[] = [];
+  private payinOrdersBatch: PayinOrder[] = [];
+  private timer: NodeJS.Timeout | null = null;
+  private readonly DELAY = 200; // 200ms delay
+  private readonly MAX_SIZE = 300; // Maximum batch size
+
+  reset() {
+    // Drop any pending batches and cancel scheduled flush to avoid writing stale data after clear
+    this.payoutOrdersBatch = [];
+    this.payinOrdersBatch = [];
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+  }
+
+  addPayoutOrders(orders: PayoutOrder[]) {
+    this.payoutOrdersBatch.push(...orders);
+
+    // Reach maximum batch size, submit immediately
+    if (this.payoutOrdersBatch.length >= this.MAX_SIZE) {
+      this.flushPayoutOrders();
+      return;
+    }
+
+    // Otherwise delay submission
+    this.scheduleFlush();
+  }
+
+  addPayinOrders(orders: PayinOrder[]) {
+    this.payinOrdersBatch.push(...orders);
+
+    if (this.payinOrdersBatch.length >= this.MAX_SIZE) {
+      this.flushPayinOrders();
+      return;
+    }
+
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+    }
+
+    this.timer = setTimeout(() => {
+      this.flushPayoutOrders();
+      this.flushPayinOrders();
+    }, this.DELAY);
+  }
+
+  private flushPayoutOrders() {
+    if (this.payoutOrdersBatch.length > 0) {
+      useOrderStore.getState().addPayoutOrders(this.payoutOrdersBatch);
+      this.payoutOrdersBatch = [];
+    }
+  }
+
+  private flushPayinOrders() {
+    if (this.payinOrdersBatch.length > 0) {
+      useOrderStore.getState().addPayinOrders(this.payinOrdersBatch);
+      this.payinOrdersBatch = [];
+    }
+  }
+}
+
+const orderBatcher = new OrderBatcher();
+
+export function resetOrderBatcher() {
+  orderBatcher.reset();
+}
 
 export class PushMessageService extends EventEmitter {
   private handlers: PushMessageHandlers = {};
@@ -100,75 +178,85 @@ export class PushMessageService extends EventEmitter {
 // Default push message handler implementation
 export class DefaultPushMessageHandlers {
   /**
-   * Handle collection orders push
+   * Handle collection orders push (using batch processing)
    */
   static handleCollectionOrders(message: CollectionOrdersPushMessage): void {
-    const { chain, total_records, list } = message.data;
-
-    if (list && list.length > 0) {
-      const payinOrders: PayinOrder[] = list.map((item: PayinOrder) => ({
-        ...item,
-        chain: chain,
-        status: PayinOrderStatus.Pending,
-      }));
-
-      DefaultPushMessageHandlers.handlePayinOrders(payinOrders);
+    const { list } = message.data;
+    if (Boolean(list?.length)) {
+      if (list[0].chain === useChainConfigStore.getState().curChainConfig.chain) {
+        DefaultPushMessageHandlers.handlePayinOrders(list);
+      }
     }
-
-    list.forEach((order, index) => {
-      // Process order data if needed
-    });
-
-    // Can trigger:
-    // 1. Update global state
-    // 2. Show notifications
-    // 3. Refresh related components
-    // 4. Trigger other business logic
   }
 
   /**
-   * Handle collection order data (migrated from MerchantWebSocketService)
+   * Handle collection order data (using batch processing)
    */
-  static handlePayinOrders(collectionDatas: PayinOrder | PayinOrder[]): void {
-    if (!collectionDatas) return;
-
-    const orderStore = useOrderStore.getState();
-    const payinOrderStatusStore = usePayinOrderStatusStore.getState();
-
-    const validOrders: PayinOrder[] = [collectionDatas]
-      .flat()
-      .filter((order: PayinOrder) => Boolean(order) && typeof order === 'object');
-    if (validOrders.length > 0) {
-      const orderKey = `${validOrders[0].address}${validOrders[0].created_at}${validOrders[0].usdt}`;
-
-      orderStore.addPayinOrders(validOrders);
-      payinOrderStatusStore.setOrdersStatus(validOrders, PayinOrderStatus.Pending);
-    }
+  static handlePayinOrders(collectionDatas: PayinOrder[]): void {
+    // Use batch processing instead of immediate update
+    orderBatcher.addPayinOrders(collectionDatas);
   }
 
   /**
-   * Handle payout orders push
+   * Handle payout orders push (using batch processing)
    */
   static handlePayoutOrders(message: PayoutOrdersPushMessage): void {
-    const orderStore = useOrderStore.getState();
     const { list } = message.data;
-    list && orderStore.addPayoutOrders(list);
+    if (
+      Boolean(list?.length) &&
+      list[0].chain === useChainConfigStore.getState().curChainConfig.chain
+    ) {
+      orderBatcher.addPayoutOrders(list);
+    }
   }
 
   /**
    * Handle lock status push
    */
   static handleLocks(message: LocksPushMessage): void {
-    const { total_records, list } = message.data;
+    const { list } = message.data;
+    const orderStore = useOrderStore.getState();
 
-    list.forEach((lock, index) => {
-      // Process lock data if needed
-    });
+    const payinOrderStatusStore = usePayinOrderStatusStore.getState();
+    const lockData = list[0];
+    if (Boolean(lockData?.prefixies?.length)) {
+      if (lockData.type === 'payout_order') {
+        // Filter out existing order prefixes
+        const existingPrefixes = lockData.prefixies.filter((prefix) =>
+          orderStore.payoutOrders.has(prefix)
+        );
 
-    // Can trigger:
-    // 1. Update lock status display
-    // 2. Show lock status change notifications
-    // 3. Refresh related UI components
+        if (existingPrefixes.length > 0) {
+          if (lockData.status === 'lock') {
+            orderStore.updatePayoutOrdersStatus(existingPrefixes, {
+              status: PayoutOrderStatus.Locked,
+              isLocked: true,
+            });
+          } else if (lockData.status === 'unlock') {
+            orderStore.updatePayoutOrdersStatus(existingPrefixes, {
+              status: PayoutOrderStatus.Pending,
+              isLocked: false,
+            });
+          }
+        }
+      } else {
+        if (lockData.type === 'collection_gas') {
+          // Filter out existing order prefixes
+          const existingPrefixes = lockData.prefixies.filter((prefix) =>
+            orderStore.rechargeOrders.has(prefix)
+          );
+
+          if (existingPrefixes.length > 0) {
+            existingPrefixes.forEach((prefix) => {
+              payinOrderStatusStore.setOrderStatus(
+                prefix,
+                lockData.status === 'lock' ? PayinOrderStatus.Locked : PayinOrderStatus.Pending
+              );
+            });
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -178,12 +266,13 @@ export class DefaultPushMessageHandlers {
     const merchantStore = useMerchantStore.getState();
     const syncConfigStore = useSyncConfigStore.getState();
     const { chain, list } = message.data;
-    const authStore = useAuthStore.getState();
+
     if (list.length > 0) {
       if (syncConfigStore.isExecutingSync) {
         return;
       }
-      if (chain === authStore.cur_chain.chain) {
+      const curChainConfig = useChainConfigStore.getState().curChainConfig;
+      if (chain === curChainConfig.chain) {
         merchantStore.updateAddressUsage(list[0]);
       }
     }

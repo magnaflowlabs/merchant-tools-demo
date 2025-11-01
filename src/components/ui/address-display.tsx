@@ -39,7 +39,7 @@ export function AddressDisplay({
       await navigator.clipboard.writeText(address);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       const textArea = document.createElement('textarea');
       textArea.value = address;
       document.body.appendChild(textArea);

@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { IconFileImport, IconEye, IconEyeOff } from '@tabler/icons-react';
+import { IconFileImport } from '@tabler/icons-react';
 import { toast } from 'sonner';
 import { importKeystore } from '@/services/importKeystore';
+import { ToggleVisibilityButton } from '@/components/customerUI';
+import { logger } from '@/utils/logger';
 
 interface ImportWalletModalProps {
   isOpen: boolean;
@@ -31,29 +38,36 @@ export function ImportWalletModal({
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Check file type
-      if (!file.name.endsWith('.json')) {
-        toast.error('Please select a JSON file');
+      // basic size limit: 2MB
+      if (file.size > 2 * 1024 * 1024) {
+        toast.error('File too large (max 2MB)');
+        event.target.value = '';
         return;
       }
-
-      // Read file content
+      if (!file.name.endsWith('.json')) {
+        toast.error('Please select a JSON file');
+        event.target.value = '';
+        return;
+      }
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
           const content = e.target?.result as string;
-
-          // Validate JSON format
-          JSON.parse(content);
-
-          // Save file content and JSON string
+          const data = JSON.parse(content);
+          // minimal keystore structure validation
+          const isValidKeystore =
+            (typeof data === 'object' && data !== null &&
+              (data.crypto || data.Crypto || data['x-ethers'])) || false;
+          if (!isValidKeystore) {
+            toast.error('Invalid keystore structure');
+            event.target.value = '';
+            return;
+          }
           setSelectedFile(file);
           setJsonContent(content);
-
-          // Show password input modal
           setIsPasswordModalOpen(true);
         } catch (error) {
-          console.error('JSON parsing error:', error);
+          logger.error('JSON parsing error', error);
           toast.error('Invalid file format, please select a valid JSON file');
         }
       };
@@ -61,10 +75,9 @@ export function ImportWalletModal({
       reader.onerror = () => {
         toast.error('File reading failed');
       };
-
-      // Read file as text
       reader.readAsText(file);
     }
+    event.target.value = '';
   };
 
   const handlePasswordSubmit = async () => {
@@ -82,19 +95,21 @@ export function ImportWalletModal({
     setIsLoading(true);
 
     try {
-      // Call importKeystore function
       const result = await importKeystore(jsonContent, password);
-
       if (result.success) {
         const walletName = result.walletName || selectedFile.name.replace('.json', '');
 
         onImport(selectedFile, walletName, jsonContent, password);
         onClose();
         resetForm();
-      } else if (result.errorMessage && !result.success) {
-        setPasswordError(result.errorMessage);
+      } else {
+        setPasswordError(
+          result.errorMessage ||
+            'Unknown error occurred while importing wallet, please check file format and password'
+        );
       }
     } catch (error) {
+      logger.error('Error importing wallet', error);
       setPasswordError(
         'Unknown error occurred while importing wallet, please check file format and password'
       );
@@ -119,7 +134,6 @@ export function ImportWalletModal({
 
   const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setPassword(e.target.value);
-    // When user starts to input, clear the error information
     if (passwordError) {
       setPasswordError('');
     }
@@ -129,6 +143,8 @@ export function ImportWalletModal({
     setIsPasswordModalOpen(false);
     setPasswordError('');
     setPassword('');
+    setSelectedFile(null);
+    setJsonContent('');
   };
 
   return (
@@ -137,6 +153,7 @@ export function ImportWalletModal({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold text-center">Import Wallet</DialogTitle>
+            <DialogDescription></DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6">
@@ -171,40 +188,32 @@ export function ImportWalletModal({
             <DialogTitle className="text-xl font-bold text-center">
               Enter Keystore Password
             </DialogTitle>
+            <DialogDescription></DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="password">Wallet Password</Label>
               <div className="relative">
                 <Input
-                  id="password"
                   type={showPassword ? 'text' : 'password'}
                   placeholder="Please enter Keystore password"
                   value={password}
                   onChange={handlePasswordChange}
-                  onKeyPress={(e) => {
+                  onKeyDown={(e) => {
                     if (e.key === 'Enter' && !isLoading) {
                       handlePasswordSubmit();
                     }
                   }}
                   disabled={isLoading}
                   className={passwordError ? 'border-red-500 focus:border-red-500' : ''}
+                  autoComplete="off"
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
-                  onClick={() => setShowPassword(!showPassword)}
+                <ToggleVisibilityButton
+                  isVisible={showPassword}
+                  onToggle={() => setShowPassword(!showPassword)}
                   disabled={isLoading}
-                >
-                  {!showPassword ? (
-                    <IconEyeOff className="h-4 w-4" />
-                  ) : (
-                    <IconEye className="h-4 w-4" />
-                  )}
-                </Button>
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                />
               </div>
               {passwordError && <p className="text-sm text-red-500 mt-1">{passwordError}</p>}
             </div>

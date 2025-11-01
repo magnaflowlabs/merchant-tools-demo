@@ -17,8 +17,8 @@ export class WebSocketService {
   private tasksService: TasksService;
   private pushMessageService: PushMessageService;
 
-  // Heartbeat tracking
-  private lastHeartbeatTime: number = 0;
+  private lastMessageReceiveTime: number = 0;
+  private lastMessageSendTime: number = 0;
 
   // Reconnection related
   private reconnectAttempts = 0;
@@ -53,12 +53,14 @@ export class WebSocketService {
   private setupWebSocket(): void {
     this.wsCore.on(WEBSOCKET_EVENTS.CONNECT, () => {
       this.reconnectAttempts = 0;
-      this.lastHeartbeatTime = 0;
+      this.lastMessageReceiveTime = 0;
+      this.lastMessageSendTime = 0;
     });
 
     this.wsCore.on(WEBSOCKET_EVENTS.DISCONNECT, (event) => {});
 
     this.wsCore.on(WEBSOCKET_EVENTS.MESSAGE, (event) => {
+      this.lastMessageReceiveTime = Date.now();
       const data = event.detail;
       this.messageManager.receiveMessage(data);
     });
@@ -70,6 +72,7 @@ export class WebSocketService {
     // Initial binding for first connection
     this.messageManager.on(WEBSOCKET_EVENTS.MESSAGE_ENQUEUED, (event: CustomEvent) => {
       const message = event.detail;
+      this.lastMessageSendTime = Date.now();
       this.wsCore.send(message);
     });
   }
@@ -77,10 +80,12 @@ export class WebSocketService {
     this.tasksService.addHandlers([
       {
         name: 'heartbeat',
-        handler: async (now: number) => {
+        handler: (now: number) => {
           if (!this.isConnected()) return;
           this.checkHeartbeatTimeout(now);
-          await this.sendPing();
+          if (now - this.lastMessageSendTime > TASK_CONFIG.HEARTBEAT_SEND_TIMEOUT) {
+            this.sendPing();
+          }
         },
         interval: TASK_CONFIG.HEARTBEAT_INTERVAL,
       },
@@ -231,9 +236,6 @@ export class WebSocketService {
 
     try {
       await this.sendRequest(HEARTBEAT_CONFIG.PING_TYPE);
-
-      // Only update heartbeat time on successful response
-      this.lastHeartbeatTime = Date.now();
     } catch (error) {
       console.warn('❌ Heartbeat failed:', error);
       // Don't throw error here, let timeout check handle it
@@ -241,23 +243,22 @@ export class WebSocketService {
   }
 
   // Check heartbeat timeout
-  private checkHeartbeatTimeout(now: number): void {
-    // If no heartbeat has been sent yet, skip check
-    if (this.lastHeartbeatTime === 0) {
+  private checkHeartbeatTimeout(now: number) {
+    if (this.lastMessageReceiveTime === 0) {
       return;
     }
 
-    const timeSinceLastHeartbeat = now - this.lastHeartbeatTime;
+    const timeSinceLastHbReceive = now - this.lastMessageReceiveTime;
 
     // Timeout threshold: 3 times the heartbeat interval (15 seconds)
-    const timeoutThreshold = TASK_CONFIG.HEARTBEAT_INTERVAL * TASK_CONFIG.HEARTBEAT_TIMEOUT_FACTOR;
+    const timeoutThreshold =
+      TASK_CONFIG.HEARTBEAT_SEND_TIMEOUT * TASK_CONFIG.HEARTBEAT_TIMEOUT_FACTOR;
 
-    if (timeSinceLastHeartbeat > timeoutThreshold) {
+    if (timeSinceLastHbReceive > timeoutThreshold) {
       console.error('💔 Heartbeat timeout detected!', {
-        timeSinceLastHeartbeat,
+        timeSinceLastHbReceive,
         timeoutThreshold,
       });
-
       this.wsCore.disconnect();
     }
   }
